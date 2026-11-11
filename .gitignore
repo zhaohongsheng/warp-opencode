@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Temporary / build artifacts
+*.download
+*.tmp
+*.bak
+*.old
+*.log
+
+# OS metadata
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# usque device credentials (config/usque/config.json) - never commit
+config/usque/
+usque/

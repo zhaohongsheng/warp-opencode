@@ -1,0 +1,1206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WARP Control - opencode 出口 IP 管家</title>
+<style>
+  :root{
+    --bg:#070a11; --panel:#0e141f; --panel2:#121a27; --line:#1d2838;
+    --txt:#e6edf7; --dim:#8492a6; --accent:#22d3ee; --accent2:#3b82f6;
+    --ok:#34d399; --warn:#fbbf24; --err:#f87171; --mono:ui-monospace,SFMono-Regular,Consolas,"Courier New",monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(1200px 600px at 10% -10%, rgba(59,130,246,.16), transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, rgba(34,211,238,.12), transparent 55%),
+      var(--bg);
+    color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    min-height:100vh;padding-bottom:48px;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:22px 20px}
+  header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+  .brand{display:flex;align-items:center;gap:10px}
+  .logo{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--accent2),var(--accent));color:#04121a;font-weight:800;font-size:15px}
+  h1{font-size:19px;font-weight:650;letter-spacing:.3px}
+  .sub{color:var(--dim);font-size:12.5px;margin-left:2px}
+  .actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .pill{font-size:12px;padding:5px 11px;border-radius:999px;border:1px solid var(--line);
+    background:#0b111b;color:var(--dim);display:inline-flex;align-items:center;gap:6px}
+  .pill::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--dim)}
+  .pill.running{color:#b8f5e2;border-color:rgba(52,211,153,.35);background:rgba(52,211,153,.08)}
+  .pill.running::before{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .pill.starting,.pill.stopping,.pill.rotating{color:#ffe6a8;border-color:rgba(251,191,36,.35);background:rgba(251,191,36,.08)}
+  .pill.starting::before,.pill.stopping::before,.pill.rotating::before{background:var(--warn);animation:blink 1s infinite}
+  .pill.error{color:#ffc9c9;border-color:rgba(248,113,113,.4);background:rgba(248,113,113,.08)}
+  .pill.error::before{background:var(--err)}
+  @keyframes blink{50%{opacity:.25}}
+  .btn{border:1px solid var(--line);background:#131c28;color:var(--txt);padding:8px 15px;border-radius:9px;
+    font-size:13px;cursor:pointer;transition:.15s;font-family:inherit}
+  .btn:hover:not(:disabled){border-color:#2f4056;background:#18222f;transform:translateY(-1px)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn.primary{background:linear-gradient(135deg,var(--accent2),#0ea5c6);border:none;color:#04121a;font-weight:650}
+  .btn.ghost{background:transparent}
+  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:18px;overflow-x:auto}
+  .tab{background:none;border:none;color:var(--dim);padding:10px 15px;font-size:13.5px;cursor:pointer;
+    border-bottom:2px solid transparent;font-family:inherit;white-space:nowrap}
+  .tab:hover{color:var(--txt)}
+  .tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+  .page{display:none}
+  .page.active{display:block;animation:fade .22s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:12px;margin-bottom:16px}
+  .stat{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);
+    border-radius:13px;padding:14px 15px;position:relative;overflow:hidden}
+  .stat .label{font-size:11.5px;color:var(--dim);letter-spacing:.4px;margin-bottom:7px}
+  .stat .value{font-size:19px;font-weight:600;font-family:var(--mono);word-break:break-all;line-height:1.25}
+  .stat .hint{font-size:11px;color:var(--dim);margin-top:5px}
+  .stat.accent::after{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(var(--accent),var(--accent2))}
+  .green{color:var(--ok)} .yellow{color:var(--warn)} .red{color:var(--err)} .cyan{color:var(--accent)}
+
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:860px){.cols{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:17px}
+  .card h3{font-size:13.5px;font-weight:600;margin-bottom:13px;display:flex;align-items:center;gap:7px}
+  .card h3 span.tag{font-size:10.5px;color:var(--dim);border:1px solid var(--line);border-radius:5px;padding:2px 6px;font-weight:400}
+  .kv{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-bottom:1px dashed #182232;font-size:13px}
+  .kv:last-child{border-bottom:none}
+  .kv .k{color:var(--dim);font-size:12.5px}
+  .kv .v{font-family:var(--mono);font-size:12.5px;display:flex;align-items:center;gap:8px}
+  .copy{border:1px solid var(--line);background:#0d141e;color:var(--dim);border-radius:6px;
+    font-size:11px;padding:3px 8px;cursor:pointer;font-family:inherit}
+  .copy:hover{color:var(--accent);border-color:rgba(34,211,238,.4)}
+  pre.code{background:#05080e;border:1px solid var(--line);border-radius:10px;padding:13px;
+    font-family:var(--mono);font-size:12px;line-height:1.65;color:#b9c7db;overflow:auto;white-space:pre}
+  .code-head{display:flex;justify-content:space-between;align-items:center;margin:12px 0 7px;font-size:11.5px;color:var(--dim)}
+  .code-head:first-child{margin-top:0}
+
+  .form{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:760px){.form{grid-template-columns:1fr}}
+  .field{display:flex;flex-direction:column;gap:6px}
+  .field.full{grid-column:1/-1}
+  .field label{font-size:12.5px;color:var(--dim)}
+  .field input[type=text],.field input[type=number],.field select,.field input[type=password]{
+    background:#0a1119;border:1px solid var(--line);border-radius:8px;padding:9px 11px;color:var(--txt);
+    font-size:13px;font-family:inherit;outline:none;transition:.15s;width:100%}
+  .field input:focus,.field select:focus{border-color:var(--accent2);box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+  .field .tip{font-size:11px;color:#61708a;line-height:1.5}
+  .check{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--txt);padding-top:4px;cursor:pointer}
+  .check input{width:16px;height:16px;accent-color:var(--accent2);cursor:pointer}
+  .row-actions{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
+  .detected{margin-top:10px;font-size:12.5px;color:var(--dim);line-height:1.9}
+  .detected b{color:var(--accent)}
+
+  #logBox{background:#04070c;border:1px solid var(--line);border-radius:12px;padding:12px;
+    height:min(62vh,620px);overflow:auto;font-family:var(--mono);font-size:12px;line-height:1.7}
+  .log-line{display:flex;gap:9px;white-space:pre-wrap;word-break:break-word}
+  .log-line .t{color:#4b5b71;flex:0 0 auto}
+  .log-line .m{flex:1}
+  .log-line.debug .m{color:#6b7b91}
+  .log-line.info .m{color:#c3d0e2}
+  .log-line.warn .m{color:var(--warn)}
+  .log-line.error .m{color:var(--err)}
+  .log-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+  .muted{color:var(--dim);font-size:12.5px}
+  .help{font-size:13.5px;line-height:1.85;color:#b6c3d6}
+  .help h3{color:var(--txt);font-size:14px;margin:20px 0 8px}
+  .help h3:first-child{margin-top:0}
+  .help code{background:#0a1119;border:1px solid var(--line);border-radius:5px;padding:1px 6px;
+    font-family:var(--mono);font-size:12px;color:var(--accent)}
+  .help ul{padding-left:20px}
+  .help li{margin-bottom:5px}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);background:#152030;
+    border:1px solid #26364b;color:var(--txt);padding:11px 20px;border-radius:10px;font-size:13px;
+    opacity:0;pointer-events:none;transition:.25s;z-index:99;box-shadow:0 12px 32px rgba(0,0,0,.45)}
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+  .banner{margin-bottom:14px;padding:11px 14px;border-radius:10px;font-size:12.5px;display:none;
+    border:1px solid rgba(248,113,113,.35);background:rgba(248,113,113,.08);color:#ffc9c9}
+  .banner.show{display:block}
+  .mini{margin-top:6px}
+  .mini .log-line{font-size:11.8px}
+  .model-table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .model-table th,.model-table td{padding:9px 8px;border-bottom:1px solid #182232;text-align:left;vertical-align:top}
+  .model-table th{color:var(--dim);font-size:11.5px;font-weight:600;white-space:nowrap}
+  .model-table td{color:#c8d4e6}
+  .model-table .mono{font-family:var(--mono);font-size:11.5px;word-break:break-all}
+  .badge{display:inline-block;padding:2px 7px;border-radius:999px;font-size:10.5px;border:1px solid var(--line);background:#0b111b;color:var(--dim);white-space:nowrap}
+  .badge.ok{color:#b8f5e2;border-color:rgba(52,211,153,.35);background:rgba(52,211,153,.08)}
+  .badge.warn{color:#ffe6a8;border-color:rgba(251,191,36,.35);background:rgba(251,191,36,.08)}
+  .badge.err{color:#ffc9c9;border-color:rgba(248,113,113,.35);background:rgba(248,113,113,.08)}
+  .btn.sm{padding:5px 10px;font-size:11.5px;border-radius:7px}
+  .modal-mask{position:fixed;inset:0;background:rgba(3,7,12,.72);display:none;align-items:center;
+    justify-content:center;z-index:120;padding:20px}
+  .modal-mask.show{display:flex}
+  .modal{background:#0c1420;border:1px solid var(--line);border-radius:14px;max-width:520px;width:100%;
+    box-shadow:0 24px 60px rgba(0,0,0,.55);overflow:hidden}
+  .modal-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;
+    border-bottom:1px solid var(--line)}
+  .modal-head h3{margin:0;font-size:15px;color:var(--txt)}
+  .modal-x{background:none;border:0;color:var(--dim);font-size:22px;line-height:1;cursor:pointer;padding:0 4px}
+  .modal-x:hover{color:var(--txt)}
+  .modal-body{padding:16px}
+  .modal-foot{display:flex;justify-content:flex-end;padding:0 16px 16px}
+  .tip-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+  .tip-grid figure{margin:0;background:#070c13;border:1px solid var(--line);border-radius:10px;
+    padding:10px;text-align:center}
+  .tip-grid img{width:100%;height:auto;border-radius:6px;display:block;background:#fff}
+  .tip-grid figcaption{margin-top:8px;font-size:11.5px;color:var(--dim)}
+  @media(max-width:520px){.tip-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<script>
+(function () {
+  var STATUS = {
+    phase: "running", busy: false, running: true, backend: "builtin",
+    socks_port: 40000, http_port: 7891, socks_up: true, http_up: true,
+    egress_ip: "104.28.198.37", loc: "JP", colo: "NRT", warp: "on",
+    latency: 286, last_check: "00:22:41", last_error: "",
+    local_ip: "124.174.33.195", uptime: "00:42:07", rotate_count: 2,
+    consecutive_fail: 0, auto_rotate: true, ip_age: 734
+  };
+  var CONFIG = {
+    backend: "builtin", backend_path: "", socks_port: 40000, http_port: 7891,
+    probe_interval: 20, probe_timeout: 12, auto_rotate: true,
+    rotate_after_failures: 3, rotate_after_minutes: 0,
+    custom_command: "", warp_plus_args: "", builtin_mirror: "",
+    watch_log: "", watch_pattern: "(429|403|blocked|forbidden|rate.?limit|banned|ip.?ban|too many requests)",
+    verify_ssl: true
+  };
+  var LOGS = [
+    {id: 1, t: "00:21:03", level: "info", msg: "使用后端：builtin（内置 warp-plus）"},
+    {id: 2, t: "00:21:05", level: "info", msg: "warp-plus 已启动，SOCKS5 监听 127.0.0.1:40000"},
+    {id: 3, t: "00:21:05", level: "info", msg: "已就绪：SOCKS5 127.0.0.1:40000  ->  HTTP 127.0.0.1:7891"},
+    {id: 4, t: "00:21:06", level: "info", msg: "当前出口 IP：104.28.198.37（JP / NRT，WARP=on）"},
+    {id: 5, t: "00:22:41", level: "info", msg: "探测正常，延迟 286 ms"},
+    {id: 6, t: "00:24:10", level: "warn", msg: "开始换 IP：手动触发"},
+    {id: 7, t: "00:24:14", level: "info", msg: "出口 IP 变更：104.28.198.37 -> 104.28.211.66"},
+    {id: 8, t: "00:24:14", level: "info", msg: "当前出口 IP：104.28.211.66（JP / NRT，WARP=on）"}
+  ];
+
+  function reply(obj) {
+    return Promise.resolve(new Response(JSON.stringify(obj), {
+      status: 200, headers: {"Content-Type": "application/json"}
+    }));
+  }
+
+  window.fetch = function (url) {
+    var u = String(url);
+    if (u.indexOf("/api/status") >= 0) return reply(STATUS);
+    if (u.indexOf("/api/config") >= 0) return reply({config: CONFIG, config_path: "（静态预览，未连接真实后端）"});
+    if (u.indexOf("/api/logs") >= 0) {
+      var m = u.match(/since=(\d+)/);
+      var since = m ? Number(m[1]) : 0;
+      return reply({items: LOGS.filter(function (i) { return i.id > since; })});
+    }
+    if (u.indexOf("/api/detect") >= 0) {
+      return reply({backends: [
+        {key: "builtin", path: "（静态预览）bin/warp-plus.exe", version: "内置 warp-plus（免安装）"}
+      ]});
+    }
+    if (u.indexOf("/api/builtin") >= 0) {
+      return reply({exists: true, path: "bin/warp-plus.exe", size: 8123456, platform: "windows-amd64"});
+    }
+    return reply({ok: true, message: "静态预览：仅展示界面，未连接真实后端"});
+  };
+
+  document.addEventListener("DOMContentLoaded", function () {
+    var badge = document.createElement("div");
+    badge.textContent = "静态预览 · 非实时数据";
+    badge.style.cssText = "position:fixed;right:14px;bottom:14px;z-index:999;padding:6px 12px;" +
+      "border-radius:999px;background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.4);" +
+      "color:#fbbf24;font-size:11.5px;font-family:system-ui,sans-serif";
+    document.body.appendChild(badge);
+  });
+})();
+</script>
+
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo">W</div>
+      <div>
+        <h1>WARP Control</h1>
+        <div class="sub">opencode 出口 IP 管家 · 本地 SOCKS5 → HTTP 代理</div>
+      </div>
+    </div>
+    <div class="actions">
+      <span class="pill" id="phasePill">已停止</span>
+      <button class="btn primary" id="btnStart">启动</button>
+      <button class="btn" id="btnStop">停止</button>
+      <button class="btn ghost" id="btnRotate">立即换 IP</button>
+      <button class="btn ghost" id="btnStartOpencode">启动 OpenCode</button>
+      <button class="btn ghost" id="btnTip">打赏作者</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="dash">仪表盘</button>
+    <button class="tab" data-tab="models">模型</button>
+    <button class="tab" data-tab="cfg">设置</button>
+    <button class="tab" data-tab="log">日志</button>
+    <button class="tab" data-tab="help">帮助</button>
+  </nav>
+
+  <!-- 仪表盘 -->
+  <section class="page active" id="page-dash">
+    <div class="banner" id="errBanner"></div>
+    <div class="stats">
+      <div class="stat accent">
+        <div class="label">WARP 出口 IP</div>
+        <div class="value" id="sIp">—</div>
+        <div class="hint" id="sIpHint">尚未探测</div>
+      </div>
+      <div class="stat">
+        <div class="label">归属地 / 节点</div>
+        <div class="value" id="sLoc">—</div>
+        <div class="hint" id="sWarp">WARP 状态未知</div>
+      </div>
+      <div class="stat">
+        <div class="label">代理延迟</div>
+        <div class="value" id="sLatency">—</div>
+        <div class="hint" id="sCheck">最近检测 —</div>
+      </div>
+      <div class="stat">
+        <div class="label">后端</div>
+        <div class="value" id="sBackend">—</div>
+        <div class="hint" id="sUptime">运行时长 —</div>
+      </div>
+      <div class="stat">
+        <div class="label">SOCKS5 端口</div>
+        <div class="value" id="sSocks">—</div>
+        <div class="hint" id="sSocksState">—</div>
+      </div>
+      <div class="stat">
+        <div class="label">HTTP 端口</div>
+        <div class="value" id="sHttp">—</div>
+        <div class="hint" id="sHttpState">—</div>
+      </div>
+      <div class="stat">
+        <div class="label">OpenCode 状态</div>
+        <div class="value" id="sOpencode">—</div>
+        <div class="hint" id="sOpencodeHint">start-opencode.bat</div>
+      </div>
+    </div>
+
+    <div class="cols">
+      <div class="card">
+        <h3>代理地址 <span class="tag">仅监听 127.0.0.1</span></h3>
+        <div class="kv">
+          <span class="k">HTTP 代理（opencode 用）</span>
+          <span class="v"><span id="vHttp">—</span><button class="copy" data-copy="vHttp">复制</button></span>
+        </div>
+        <div class="kv">
+          <span class="k">SOCKS5 代理</span>
+          <span class="v"><span id="vSocks">—</span><button class="copy" data-copy="vSocks">复制</button></span>
+        </div>
+        <div class="kv">
+          <span class="k">本机直连出口 IP</span>
+          <span class="v" id="vLocal">—</span>
+        </div>
+        <div class="kv">
+          <span class="k">当前 IP 已保持</span>
+          <span class="v" id="vIpAge">—</span>
+        </div>
+        <div class="kv">
+          <span class="k">OpenCode 状态</span>
+          <span class="v" id="vOpencode">—</span>
+        </div>
+        <div class="kv">
+          <span class="k">自动换 IP</span>
+          <span class="v" id="vAuto">—</span>
+        </div>
+        <div class="kv">
+          <span class="k">OpenCode Zen 入口</span>
+          <span class="v" id="vZen">—</span>
+        </div>
+        <div class="kv">
+          <span class="k">Zen 限额触发换 IP</span>
+          <span class="v" id="vZenHits">—</span>
+        </div>
+        <div class="kv">
+          <span class="k">累计换 IP 次数</span>
+          <span class="v" id="vRotate">0</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>opencode 接入 <span class="tag">复制后重启终端</span></h3>
+        <div class="code-head"><span>Windows CMD</span><button class="copy" data-copy="cmdBlock">复制</button></div>
+        <pre class="code" id="cmdBlock"></pre>
+        <div class="code-head"><span>PowerShell</span><button class="copy" data-copy="psBlock">复制</button></div>
+        <pre class="code" id="psBlock"></pre>
+        <div class="tip muted" style="margin-top:10px;line-height:1.7">
+          提示：本程序把 SOCKS5 桥接成标准 HTTP 代理，Node/opencode 无需额外支持 socks5。
+          如果 opencode 仍走直连，请确认是在设置了环境变量的同一个终端里启动。
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h3>组件下载 <span class="tag">GitHub · 加速</span></h3>
+      <div class="tip muted" style="margin-bottom:10px;line-height:1.7">
+        加速链接使用 <code>https://xiake.pro/github/?_360safeparam=503890531</code> 作为 GitHub 加速入口（将目标 GitHub 地址作为 <code>url</code> 参数传入）。若加速入口参数格式变化，可直接使用 GitHub 原始/发布页链接。
+      </div>
+      <div style="overflow:auto">
+        <table class="model-table">
+          <thead><tr><th>组件</th><th>仓库</th><th>发布页</th><th>加速打开</th></tr></thead>
+          <tbody id="dlBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card mini" style="margin-top:14px">
+      <h3>最近事件</h3>
+      <div id="miniLog"></div>
+    </div>
+  </section>
+
+  <!-- 模型 -->
+  <section class="page" id="page-models">
+    <div class="log-toolbar">
+      <span class="muted" id="modelsHint">从 zen-gate 读取模型列表、统计与测试结果</span>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="text" id="modelSearch" placeholder="搜索模型 ID / 名称 / 渠道" style="background:#0a1119;border:1px solid var(--line);border-radius:8px;padding:7px 10px;color:var(--txt);font-size:12.5px;min-width:220px;outline:none">
+        <button class="btn ghost" id="btnModelsRefresh">刷新</button>
+      </div>
+    </div>
+    <div class="banner" id="modelsErr"></div>
+    <div class="stats" id="modelsStats" style="margin-bottom:14px"></div>
+    <div class="cols" style="margin-bottom:14px">
+      <div class="card">
+        <h3>模型测试 <span class="tag">经 zen-gate /v1</span></h3>
+        <div class="form" style="grid-template-columns:1fr">
+          <div class="field">
+            <label>模型</label>
+            <input type="text" id="testModel" list="modelList" placeholder="例如 zen/glm-5.3-flash-free 或 beam-free">
+            <datalist id="modelList"></datalist>
+          </div>
+          <div class="field">
+            <label>测试 Prompt</label>
+            <textarea id="testPrompt" rows="3" style="background:#0a1119;border:1px solid var(--line);border-radius:8px;padding:9px 11px;color:var(--txt);font-size:13px;font-family:inherit;outline:none;resize:vertical">Reply with exactly: OK</textarea>
+          </div>
+          <div class="field">
+            <label>max_tokens</label>
+            <input type="number" id="testMaxTokens" min="1" max="512" value="64">
+          </div>
+        </div>
+        <div class="row-actions"><button class="btn primary" id="btnModelTest">发送测试</button></div>
+        <pre class="code" id="modelTestOut" style="margin-top:12px;min-height:92px;white-space:pre-wrap">等待测试…</pre>
+      </div>
+      <div class="card">
+        <h3>统计概览 <span class="tag">zen-gate stats</span></h3>
+        <div id="statsDetail" class="muted" style="font-size:12.5px;line-height:1.8">加载后显示今日/累计请求、失败、token 与最近错误。</div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>模型列表 <span class="tag" id="modelsCount">0</span></h3>
+      <div style="overflow:auto">
+        <table class="model-table" id="modelsTable">
+          <thead><tr>
+            <th>模型</th><th>状态</th><th>渠道</th><th>能力</th><th>上下文</th><th>探测</th><th>操作</th>
+          </tr></thead>
+          <tbody id="modelsBody"><tr><td colspan="7" class="muted">点击“刷新”加载</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 设置 -->
+  <section class="page" id="page-cfg">
+    <div class="card">
+      <h3>WARP 后端</h3>
+      <div class="form">
+        <div class="field">
+          <label>后端选择</label>
+          <select id="fBackend">
+            <option value="auto">自动检测（推荐，无本地 WARP 时用内置）</option>
+            <option value="builtin">内置 warp-plus（免安装，首次自动下载）</option>
+            <option value="warp-cli">Cloudflare WARP 官方客户端（warp-cli）</option>
+            <option value="warp-plus">本机 warp-plus</option>
+            <option value="usque">usque</option>
+            <option value="custom">自定义命令</option>
+          </select>
+          <div class="tip">自动模式：优先本机 warp-cli / warp-plus / usque，都没有则使用内置后端并自动下载。</div>
+        </div>
+        <div class="field">
+          <label>程序路径（留空则自动查找）</label>
+          <input type="text" id="fPath" placeholder="例如 C:\Tools\warp-plus.exe">
+          <div class="tip">仅需在后端未加入 PATH 时填写。</div>
+        </div>
+        <div class="field full">
+          <label>自定义命令（可选，{port} 会替换为 SOCKS5 端口）</label>
+          <input type="text" id="fCustom" placeholder="例如 warp-plus.exe -b 127.0.0.1:{port} --gool">
+          <div class="tip">选择“自定义命令”后端时必填；支持任意能提供本地 SOCKS5 的程序。</div>
+        </div>
+        <div class="field full">
+          <label>warp-plus 额外参数（warp-plus / 内置后端生效）</label>
+          <input type="text" id="fPlusArgs" placeholder="例如 --gool --scan">
+        </div>
+        <div class="field full">
+          <label>内置后端下载镜像（可选）</label>
+          <input type="text" id="fMirror" placeholder="例如 https://ghfast.top">
+          <div class="tip">GitHub 访问不畅时填写镜像前缀；留空则直连官方地址。</div>
+        </div>
+      </div>
+      <div class="row-actions">
+        <button class="btn" id="btnDetect">检测本机后端</button>
+        <button class="btn" id="btnBuiltin">下载 / 更新内置后端</button>
+        <span class="muted" id="detectInfo"></span>
+      </div>
+      <div class="detected" id="detectList"></div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h3>端口与探测</h3>
+      <div class="form">
+        <div class="field">
+          <label>上游 SOCKS5 端口</label>
+          <input type="number" id="fSocks" min="1" max="65535">
+          <div class="tip">warp-cli 代理模式默认 40000。</div>
+        </div>
+        <div class="field">
+          <label>本地 HTTP 代理端口</label>
+          <input type="number" id="fHttp" min="1" max="65535">
+          <div class="tip">opencode 使用的 HTTP_PROXY 端口，默认 7891。</div>
+        </div>
+        <div class="field">
+          <label>探测间隔（秒）</label>
+          <input type="number" id="fInterval" min="5" max="3600">
+        </div>
+        <div class="field">
+          <label>探测超时（秒）</label>
+          <input type="number" id="fTimeout" min="3" max="120">
+        </div>
+        <div class="field">
+          <label class="check"><input type="checkbox" id="fVerify"> 校验证书（关闭仅在证书异常时使用）</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h3>自动换 IP</h3>
+      <div class="form">
+        <div class="field full">
+          <label class="check"><input type="checkbox" id="fAuto"> 启用自动换 IP</label>
+        </div>
+        <div class="field">
+          <label>连续探测失败多少次后换 IP</label>
+          <input type="number" id="fFail" min="1" max="50">
+          <div class="tip">代理不通 / 请求被重置时触发。</div>
+        </div>
+        <div class="field">
+          <label>出口 IP 保持多少分钟后强制更换（0 = 关闭）</label>
+          <input type="number" id="fMinutes" min="0" max="1440">
+          <div class="tip">用于避免同一出口 IP 使用过久被风控。</div>
+        </div>
+        <div class="field full">
+          <label>opencode 日志文件（可选）</label>
+          <input type="text" id="fWatchLog" placeholder="例如 C:\Users\you\.local\share\opencode\log\xxx.log">
+          <div class="tip">监控该文件新增内容，命中关键词即自动换 IP。</div>
+        </div>
+        <div class="field full">
+          <label>封禁关键词（正则，不区分大小写）</label>
+          <input type="text" id="fWatchPattern">
+        </div>
+      </div>
+      <div class="row-actions">
+        <button class="btn primary" id="btnSave">保存配置</button>
+        <span class="muted" id="saveInfo"></span>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h3>OpenCode Zen 入口 <span class="tag">zen-gate</span></h3>
+      <div class="form">
+        <div class="field full">
+          <label class="check"><input type="checkbox" id="fZen"> 随 WARP 一起启停 zen-gate</label>
+          <div class="tip">zen-gate 把 OpenCode Zen 免费车道封装成本地 OpenAI / Anthropic 兼容入口。
+            opencode 的 baseURL 指向 <code>http://127.0.0.1:端口/v1</code>，API Key 用 zen-gate 面板里的主密钥。</div>
+        </div>
+        <div class="field full">
+          <label class="check"><input type="checkbox" id="fZenWarp"> 强制 zen-gate 走 WARP 出口（停止时还原原设置）</label>
+          <label class="check"><input type="checkbox" id="fAutoStartOpencode"> WARP 验证通过后自动启动 OpenCode（通过 <code>start-opencode.bat</code>；启动前会结束现有 opencode 进程，若已在运行则跳过）</label>
+          <div class="tip">接管已在运行的实例时，会通过 zen-gate 的管理接口把代理模式改为
+            <code>http://127.0.0.1:HTTP端口</code>；这样 Zen 免费额度按 WARP 出口 IP 计量。</div>
+        </div>
+        <div class="field">
+          <label>zen-gate 程序路径</label>
+          <input type="text" id="fZenPath" placeholder="bin\zen-gate.exe">
+          <div class="tip">相对路径按程序目录解析。</div>
+        </div>
+        <div class="field">
+          <label>zen-gate 端口</label>
+          <input type="number" id="fZenPort" min="1" max="65535">
+          <div class="tip">默认 8788；留空写入端口时程序也会自动识别正在运行的实例。</div>
+        </div>
+        <div class="field full">
+          <label>zen-gate 数据目录（可选）</label>
+          <input type="text" id="fZenData" placeholder="留空 = %APPDATA%\zen-gate">
+          <div class="tip">留空会直接接管已在运行的实例，并复用它的渠道、密钥和模型名单。</div>
+        </div>
+        <div class="field full">
+          <div class="tip">
+            触发规则：监控 zen-gate 的 access / routing 日志，命中 <code>status=429</code>、<code>err=quota</code>
+            等限额信号时自动换一个 WARP 出口 IP（受上方“自动换 IP”总开关约束，90 秒内只触发一次）。
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 日志 -->
+  <section class="page" id="page-log">
+    <div class="log-toolbar">
+      <span class="muted">实时输出，最多保留 1500 条</span>
+      <button class="btn ghost" id="btnClear">清空显示</button>
+    </div>
+    <div id="logBox"></div>
+  </section>
+
+  <!-- 帮助 -->
+  <section class="page" id="page-help">
+    <div class="card help">
+      <h3>它解决什么问题</h3>
+      <p>opencode 直连时出口 IP 固定，容易被服务端按 IP 限流或封禁。本程序托管 Cloudflare WARP，
+         让 opencode 的请求从 WARP 出口发出；并在检测到异常时自动重连 WARP 更换出口 IP。
+         它同时把 WARP 的 SOCKS5 转成标准 HTTP 代理，避免 opencode / Node 不支持 socks5 的问题。</p>
+
+      <h3>前置条件（任选其一）</h3>
+      <ul>
+        <li><b>内置后端（推荐，免安装）</b>：后端选择“内置 warp-plus”或保持“自动检测”。
+            首次启动时程序会从官方仓库下载 <code>warp-plus</code> 到本目录的 <code>bin/</code>，
+            之后不再需要联网下载。GitHub 访问不畅时可在设置里填写下载镜像。</li>
+        <li><b>Cloudflare WARP 官方客户端</b>：安装后确认 <code>warp-cli</code> 可用。首次使用可能需要
+            <code>warp-cli --accept-tos registration new</code>。</li>
+        <li><b>本机 warp-plus</b>：已有 <code>warp-plus.exe</code> 时，在“设置”里指定路径即可。</li>
+        <li><b>usque</b>：先执行 <code>usque register</code>，再让本程序托管。</li>
+      </ul>
+
+      <h3>使用步骤</h3>
+      <ul>
+        <li>1. “设置”里选后端（默认自动检测，没有本地 WARP 时自动用内置后端），保存。</li>
+        <li>2. 回到“仪表盘”点“启动”。首次使用内置后端会先下载，可在“日志”页看进度。</li>
+        <li>3. 等待状态变为“运行中”且显示出口 IP。</li>
+        <li>4. 复制页面上的 CMD 或 PowerShell 环境变量，在同一个终端里启动 opencode。</li>
+        <li>5. 需要换 IP 时点“立即换 IP”；开启自动换 IP 后，失败或超时会自动更换。</li>
+      </ul>
+
+      <h3>opencode 侧配置示例</h3>
+      <pre class="code">:: Windows CMD
+set HTTP_PROXY=http://127.0.0.1:7891
+set HTTPS_PROXY=http://127.0.0.1:7891
+opencode</pre>
+      <pre class="code"># PowerShell
+$env:HTTP_PROXY="http://127.0.0.1:7891"
+$env:HTTPS_PROXY="http://127.0.0.1:7891"
+opencode</pre>
+
+      <h3>OpenCode Zen 入口</h3>
+      <ul>
+        <li>zen-gate 把 OpenCode Zen 免费车道封装成本地 OpenAI / Anthropic 兼容接口。
+            开启“随 WARP 一起启停 zen-gate”后，本程序会在 WARP 就绪时拉起它（或接管已在运行的实例），
+            并把它的出口切到 WARP 的 HTTP 代理（<code>127.0.0.1:7891</code>），停止时还原原设置。</li>
+        <li>免费额度按出口 IP 计量：zen-gate 的 access / routing 日志出现
+            <code>status=429</code>、<code>err=quota</code> 等限额信号时，本程序会自动换一个 WARP 出口 IP，
+            opencode 重试即可继续使用（受“自动换 IP”总开关约束，90 秒内只触发一次）。</li>
+        <li>opencode 侧把 provider 的 baseURL 指向 <code>http://127.0.0.1:8788/v1</code>，
+            API Key 填 zen-gate 面板里的主密钥。zen-gate 端口与 WARP Control 控制台端口分开：
+            控制台默认 8787，zen-gate 默认 8788。</li>
+      </ul>
+
+      <h3>注意事项</h3>
+      <ul>
+        <li>只监听 127.0.0.1，不会把代理暴露到局域网。</li>
+        <li>warp-cli 代理模式依赖客户端未被系统全局模式占用；如提示注册，请先完成注册。</li>
+        <li>自动换 IP 会短暂中断连接，建议在空闲时触发。</li>
+        <li>代理链路异常时，先看“日志”页的具体报错，再检查端口是否被占用。</li>
+      </ul>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast"></div>
+
+<div class="modal-mask" id="tipModal" role="dialog" aria-modal="true" aria-labelledby="tipTitle">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="tipTitle">打赏作者</h3>
+      <button class="modal-x" id="tipClose" aria-label="关闭">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="tip muted">如果 WARP Control 对你有帮助，欢迎扫码打赏支持作者，感谢！</div>
+      <div class="tip-grid">
+        <figure>
+          <img src="asset/1.jpg" alt="打赏二维码 1" loading="lazy">
+          <figcaption>扫码打赏</figcaption>
+        </figure>
+        <figure>
+          <img src="asset/2.png" alt="打赏二维码 2" loading="lazy">
+          <figcaption>扫码打赏</figcaption>
+        </figure>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn primary" id="tipOk">知道了</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+let lastLogId = 0;
+let cfgData = null;
+let currentStatus = null;
+
+async function api(path, method, body){
+  const opt = {method: method || 'GET', headers: {'Content-Type': 'application/json'}};
+  if (body !== undefined) opt.body = JSON.stringify(body);
+  const res = await fetch(path, opt);
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch(e) { data = {error: text}; }
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+function toast(msg){
+  const el = $('#toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+function setText(id, val){
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
+function ghAccel(url){
+  return 'https://xiake.pro/github/?_360safeparam=503890531&url=' + encodeURIComponent(url);
+}
+
+function renderDownloads(){
+  const body = document.getElementById('dlBody');
+  if (!body) return;
+  const items = [
+    {name:'OpenCode', repo:'anomalyco/opencode', home:'https://github.com/anomalyco/opencode', rel:'https://github.com/anomalyco/opencode/releases'},
+    {name:'zen-gate', repo:'LAGcomcom/zen-gate', home:'https://github.com/LAGcomcom/zen-gate', rel:'https://github.com/LAGcomcom/zen-gate/releases'},
+    {name:'warp-plus', repo:'bepass-org/warp-plus', home:'https://github.com/bepass-org/warp-plus', rel:'https://github.com/bepass-org/warp-plus/releases'},
+    {name:'usque', repo:'Diniboy1123/usque', home:'https://github.com/Diniboy1123/usque', rel:'https://github.com/Diniboy1123/usque/releases'}
+  ];
+  body.innerHTML = items.map(it => {
+    const h = escHtml(it.home), r = escHtml(it.rel);
+    const ah = escHtml(ghAccel(it.home)), ar = escHtml(ghAccel(it.rel));
+    return '<tr>'
+      + '<td><b>' + escHtml(it.name) + '</b></td>'
+      + '<td class="mono"><a href="' + h + '" target="_blank" rel="noopener">' + escHtml(it.repo) + '</a></td>'
+      + '<td><a href="' + r + '" target="_blank" rel="noopener">GitHub 发布页</a></td>'
+      + '<td><a href="' + ah + '" target="_blank" rel="noopener">加速仓库</a> · <a href="' + ar + '" target="_blank" rel="noopener">加速发布页</a></td>'
+      + '</tr>';
+  }).join('');
+}
+
+const TIP_DATE_KEY = 'wc_tip_prompt_date';
+function tipTodayKey(){
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function showTip(){
+  const m = $('#tipModal');
+  if (!m) return;
+  m.classList.add('show');
+  // 记录“今天已提示”，关闭后当天不再自动弹出。
+  try { localStorage.setItem(TIP_DATE_KEY, tipTodayKey()); } catch (e) {}
+}
+function hideTip(){
+  const m = $('#tipModal');
+  if (m) m.classList.remove('show');
+}
+function maybeShowDailyTip(){
+  let seen = '';
+  try { seen = localStorage.getItem(TIP_DATE_KEY) || ''; } catch (e) {}
+  if (seen !== tipTodayKey()) setTimeout(showTip, 900);
+}
+
+function phaseLabel(p){
+  return ({running:'运行中', stopped:'已停止', starting:'启动中', stopping:'停止中',
+           rotating:'换 IP 中', error:'异常'})[p] || p || '未知';
+}
+
+function render(s){
+  currentStatus = s;
+  const pill = $('#phasePill');
+  pill.textContent = phaseLabel(s.phase);
+  pill.className = 'pill ' + (s.phase || 'stopped');
+
+  $('#btnStart').disabled = s.busy || s.phase === 'running';
+  $('#btnStop').disabled = s.busy || s.phase === 'stopped';
+  $('#btnRotate').disabled = s.busy || s.phase !== 'running';
+
+  setText('sIp', s.egress_ip || '—');
+  const ipHint = s.egress_ip
+    ? ('WARP=' + (s.warp || '未知') + ' · 检测于 ' + (s.last_check || '—'))
+    : (s.phase === 'running' ? '正在等待首次探测…' : '尚未探测');
+  setText('sIpHint', ipHint);
+  $('#sIp').className = 'value ' + (s.egress_ip ? 'green' : '');
+
+  const loc = [s.loc, s.colo].filter(Boolean).join(' / ') || '—';
+  setText('sLoc', loc);
+  setText('sWarp', s.warp === 'on' ? '已通过 WARP 出网' : (s.warp ? 'WARP=' + s.warp : 'WARP 状态未知'));
+
+  setText('sLatency', s.latency ? s.latency + ' ms' : '—');
+  $('#sLatency').className = 'value ' +
+    (s.latency == null ? '' : (s.latency < 400 ? 'green' : (s.latency < 900 ? 'yellow' : 'red')));
+  setText('sCheck', '最近检测 ' + (s.last_check || '—'));
+
+  setText('sBackend', s.backend || '—');
+  setText('sUptime', s.uptime ? '运行时长 ' + s.uptime : '运行时长 —');
+
+  setText('sSocks', s.socks_port || '—');
+  setText('sSocksState', s.socks_up ? '端口已监听' : '端口未监听');
+  $('#sSocksState').className = 'hint ' + (s.socks_up ? 'green' : 'red');
+
+  setText('sHttp', s.http_port || '—');
+  setText('sHttpState', s.http_up ? '端口已监听' : '端口未监听');
+  $('#sHttpState').className = 'hint ' + (s.http_up ? 'green' : 'red');
+
+  const oc = s.opencode || {};
+  const ocText = oc.running
+    ? ('运行中' + (oc.count > 1 ? ' ×' + oc.count : ''))
+    : '未运行';
+  setText('sOpencode', ocText);
+  $('#sOpencode').className = 'value ' + (oc.running ? 'green' : '');
+  setText('sOpencodeHint', oc.running
+    ? (oc.proxy_connected ? ('已连接代理' + (oc.connections ? ' · ' + oc.connections : '')) : '未检测到代理连接')
+    : 'start-opencode.bat');
+  $('#sOpencodeHint').className = 'hint ' + (oc.running ? (oc.proxy_connected ? 'green' : 'yellow') : '');
+  setText('vOpencode', oc.running
+    ? (ocText + (oc.pids && oc.pids.length ? ' · PID ' + oc.pids.join(', ') : '') +
+       (oc.proxy_connected ? ' · 经代理' : ''))
+    : '未检测到 opencode 进程');
+  $('#vOpencode').className = 'v ' + (oc.running ? (oc.proxy_connected ? 'green' : 'yellow') : '');
+
+  const httpAddr = 'http://127.0.0.1:' + s.http_port;
+  const socksAddr = 'socks5://127.0.0.1:' + s.socks_port;
+  setText('vHttp', httpAddr);
+  setText('vSocks', socksAddr);
+  setText('vLocal', s.local_ip || '—');
+  setText('vIpAge', s.ip_age ? Math.floor(s.ip_age / 60) + ' 分钟' : '—');
+  setText('vAuto', s.auto_rotate ? ('已开启（失败 ' + (s.consecutive_fail || 0) + ' 次）') : '未开启');
+  $('#vAuto').className = 'v ' + (s.auto_rotate ? 'green' : '');
+  const zen = s.zen || {};
+  const zenState = !zen.enabled ? '已关闭'
+    : (zen.running
+        ? ('http://127.0.0.1:' + zen.port + '/v1' + (zen.attached ? '（接管）' : '') +
+           (zen.egress === 'warp' ? ' · 经 WARP' : ''))
+        : '未运行');
+  setText('vZen', zenState);
+  $('#vZen').className = 'v ' + (zen.running ? 'green' : (zen.enabled ? 'yellow' : ''));
+  setText('vZenHits', zen.quota_hits
+    ? (zen.quota_hits + ' 次' + (zen.last_hit ? ' · 最近 ' + zen.last_hit : ''))
+    : '尚未触发');
+  $('#vZenHits').className = 'v ' + (zen.quota_hits ? 'yellow' : '');
+  setText('vRotate', String(s.rotate_count || 0));
+
+  const cmd = 'set HTTP_PROXY=' + httpAddr + '\r\nset HTTPS_PROXY=' + httpAddr + '\r\nopencode';
+  const ps = '$env:HTTP_PROXY="' + httpAddr + '"\r\n$env:HTTPS_PROXY="' + httpAddr + '"\r\nopencode';
+  setText('cmdBlock', cmd);
+  setText('psBlock', ps);
+
+  const banner = $('#errBanner');
+  if (s.last_error && s.phase !== 'running') {
+    banner.textContent = '错误：' + s.last_error;
+    banner.classList.add('show');
+  } else if (s.last_error) {
+    banner.textContent = '最近一次探测失败：' + s.last_error;
+    banner.classList.add('show');
+  } else {
+    banner.classList.remove('show');
+  }
+}
+
+async function refresh(){
+  try {
+    render(await api('/api/status'));
+  } catch(e) {
+    $('#phasePill').className = 'pill error';
+    $('#phasePill').textContent = '连接失败';
+  }
+}
+
+function appendLog(item, box, mini){
+  const el = document.createElement('div');
+  el.className = 'log-line ' + (item.level || 'info');
+  const t = document.createElement('span');
+  t.className = 't';
+  t.textContent = item.t;
+  const m = document.createElement('span');
+  m.className = 'm';
+  m.textContent = item.msg;
+  el.appendChild(t);
+  el.appendChild(m);
+  const nearBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+  box.appendChild(el);
+  while (box.childElementCount > (mini ? 7 : 800)) box.removeChild(box.firstChild);
+  if (nearBottom || mini) box.scrollTop = box.scrollHeight;
+}
+
+async function pollLogs(){
+  try {
+    const d = await api('/api/logs?since=' + lastLogId);
+    for (const it of d.items) {
+      lastLogId = Math.max(lastLogId, it.id);
+      appendLog(it, $('#logBox'), false);
+      appendLog(it, $('#miniLog'), true);
+    }
+  } catch(e) { /* 忽略轮询错误 */ }
+}
+
+async function act(name){
+  try {
+    const r = await api('/api/' + name, 'POST', {});
+    if (r.message) toast(r.message);
+    await refresh();
+  } catch(e) {
+    toast('操作失败：' + e.message);
+  }
+}
+
+function escHtml(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+let modelsCache = null;
+function fmtNum(n){ return (n == null || n === '') ? '—' : String(n); }
+function modelCaps(m){
+  const a = [];
+  if (m.vision) a.push('vision');
+  if (m.reasoning) a.push('reasoning');
+  if (m.systemOne) a.push('system1');
+  if (Array.isArray(m.efforts) && m.efforts.length) a.push('effort');
+  return a;
+}
+function stateBadge(state){
+  const s = String(state || 'unknown').toLowerCase();
+  let cls = 'badge';
+  if (s === 'ok' || s === 'active' || s === 'healthy' || s === 'up') cls += ' ok';
+  else if (s === 'error' || s === 'down' || s === 'blocked' || s === 'dead') cls += ' err';
+  else if (s && s !== 'unknown') cls += ' warn';
+  return '<span class="' + cls + '">' + escHtml(state || 'unknown') + '</span>';
+}
+function renderModelStats(data){
+  const box = $('#modelsStats');
+  const detail = $('#statsDetail');
+  if (!data || !data.ok) {
+    box.innerHTML = '';
+    detail.textContent = data && data.error ? ('zen-gate 不可用：' + data.error) : 'zen-gate 不可用';
+    return;
+  }
+  const models = data.models || [];
+  const stats = data.stats || {};
+  const days = stats.days || {};
+  const today = new Date().toISOString().slice(0,10);
+  const day = days[today] || {};
+  let totalReq = 0, totalFail = 0, totalOut = 0;
+  Object.values(days).forEach(d => { totalReq += (+d.requests||0); totalFail += (+d.failed||0); totalOut += (+d.output||0); });
+  const cards = [
+    ['模型数', models.length, data.base_url || ('127.0.0.1:' + data.port)],
+    ['今日请求', day.requests || 0, '失败 ' + (day.failed || 0)],
+    ['累计请求', totalReq, '失败 ' + totalFail],
+    ['累计输出 tokens', totalOut, '按 zen-gate 统计']
+  ];
+  box.innerHTML = cards.map(c => '<div class="stat"><div class="label">'+escHtml(c[0])+'</div><div class="value">'+escHtml(c[1])+'</div><div class="hint">'+escHtml(c[2])+'</div></div>').join('');
+  const recent = (stats.recent || []).slice(-8).reverse();
+  let html = '<div><b>今日</b>：请求 ' + (+day.requests||0) + '，失败 ' + (+day.failed||0) + '，输入 ' + (+day.input||0) + '，输出 ' + (+day.output||0) + '</div>';
+  html += '<div><b>累计</b>：请求 ' + totalReq + '，失败 ' + totalFail + '，输入 tokens ' + Object.values(days).reduce((a,d)=>a+(+d.input||0),0) + '，输出 tokens ' + totalOut + '</div>';
+  if (recent.length) {
+    html += '<div style="margin-top:8px"><b>最近记录</b></div><div class="mono" style="font-size:11.5px;color:#9fb0c8">';
+    recent.forEach(r => {
+      html += escHtml((r.ok?'OK':'ERR') + ' ' + (r.model||'') + (r.errCode?' ['+r.errCode+']':'') + (r.output?' out='+r.output:'')) + '<br>';
+    });
+    html += '</div>';
+  }
+  detail.innerHTML = html;
+}
+function renderModelsTable(){
+  const q = ($('#modelSearch') ? $('#modelSearch').value : '').trim().toLowerCase();
+  const data = modelsCache;
+  const body = $('#modelsBody');
+  const dl = $('#modelList');
+  if (!data || !data.ok) {
+    body.innerHTML = '<tr><td colspan="7" class="muted">'+escHtml(data && data.error ? data.error : '未加载')+'</td></tr>';
+    if (dl) dl.innerHTML = '';
+    setText('modelsCount','0');
+    return;
+  }
+  const models = (data.models || []).filter(m => {
+    if (!q) return true;
+    const hay = [m.id,m.name,m.channel,(m.channels||[]).join(','),m.state,m.detail].join(' ').toLowerCase();
+    return hay.indexOf(q) >= 0;
+  });
+  setText('modelsCount', String(models.length) + ' / ' + String((data.models||[]).length));
+  if (dl) dl.innerHTML = (data.models||[]).map(m => '<option value="'+escHtml(m.id)+'">'+escHtml((m.name||m.id)+'')+'</option>').join('');
+  if (!models.length) { body.innerHTML = '<tr><td colspan="7" class="muted">无匹配模型</td></tr>'; return; }
+  body.innerHTML = models.map(m => {
+    const caps = modelCaps(m).map(c=>'<span class="badge">'+escHtml(c)+'</span>').join(' ');
+    const ch = escHtml(m.channel || (m.channels||[]).join(',') || '—');
+    const ctx = (m.contextWindow ? (Math.round(m.contextWindow/1024)+'k ctx') : '') + (m.maxOutput ? (' / '+Math.round(m.maxOutput/1024)+'k out') : '');
+    const probe = (m.latencyMs ? (m.latencyMs+' ms') : '') + (m.detail ? ('<div class="muted" style="font-size:11px;max-width:240px;white-space:normal">'+escHtml(String(m.detail).slice(0,120))+'</div>') : '');
+    const id = escHtml(m.id||'');
+    const name = escHtml(m.name||m.id||'');
+    return '<tr>'
+      + '<td><div class="mono">'+id+'</div><div class="muted" style="font-size:11.5px">'+name+'</div></td>'
+      + '<td>'+stateBadge(m.state)+'</td>'
+      + '<td>'+ch+'</td>'
+      + '<td>'+(caps||'<span class="muted">—</span>')+'</td>'
+      + '<td class="mono" style="font-size:11.5px">'+escHtml(ctx||'—')+'</td>'
+      + '<td style="font-size:11.5px">'+(probe||'<span class="muted">—</span>')+'</td>'
+      + '<td><button class="btn sm ghost" data-pick-model="'+id+'">测试</button></td>'
+      + '</tr>';
+  }).join('');
+  body.querySelectorAll('[data-pick-model]').forEach(b => b.addEventListener('click', () => {
+    $('#testModel').value = b.dataset.pickModel || '';
+    window.scrollTo({top:0,behavior:'smooth'});
+  }));
+}
+async function loadModels(force){
+  if (!force && modelsCache && modelsCache.ok && modelsCache._at && Date.now()-modelsCache._at < 15000) {
+    renderModelStats(modelsCache); renderModelsTable(); return;
+  }
+  const hint = $('#modelsHint');
+  const err = $('#modelsErr');
+  if (hint) hint.textContent = '正在读取 zen-gate 模型与统计…';
+  if (err) { err.classList.remove('show'); err.textContent = ''; }
+  try {
+    const d = await api('/api/zen/models');
+    d._at = Date.now();
+    modelsCache = d;
+    renderModelStats(d);
+    renderModelsTable();
+    if (hint) hint.textContent = d.ok
+      ? ('zen-gate 127.0.0.1:' + d.port + ' · ' + ((d.models||[]).length) + ' 个模型')
+      : 'zen-gate 不可用';
+    if (!d.ok && err) { err.textContent = '读取失败：' + (d.error || '未知错误'); err.classList.add('show'); }
+  } catch(e) {
+    if (hint) hint.textContent = '读取失败';
+    if (err) { err.textContent = '读取失败：' + e.message; err.classList.add('show'); }
+  }
+}
+async function runModelTest(){
+  const model = ($('#testModel').value || '').trim();
+  if (!model) { toast('请输入或选择模型'); return; }
+  const prompt = $('#testPrompt').value || 'Reply with exactly: OK';
+  const max_tokens = parseInt($('#testMaxTokens').value || '64', 10) || 64;
+  const out = $('#modelTestOut');
+  const btn = $('#btnModelTest');
+  btn.disabled = true;
+  out.textContent = '正在测试 ' + model + ' …';
+  try {
+    const r = await api('/api/zen/test', 'POST', {model, prompt, max_tokens});
+    if (r.ok) {
+      let t = 'OK · ' + (r.ms||0) + ' ms · ' + (r.raw_model || model);
+      if (r.usage && (r.usage.total_tokens || r.usage.prompt_tokens || r.usage.completion_tokens)) {
+        t += '\nusage: ' + JSON.stringify(r.usage);
+      }
+      t += '\n\n' + (r.text || '(空响应)');
+      out.textContent = t;
+      toast('模型测试成功');
+    } else {
+      out.textContent = 'FAIL · ' + (r.ms||0) + ' ms · ' + model + '\n' + JSON.stringify(r.error || r, null, 2);
+      toast('模型测试失败');
+    }
+  } catch(e) {
+    out.textContent = '请求失败：' + e.message;
+    toast('模型测试请求失败');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function startOpencode(){
+  const oc = (currentStatus && currentStatus.opencode) ? currentStatus.opencode : {};
+  let msg = '将启动 OpenCode（通过 start-opencode.bat，新控制台窗口）。';
+  if (oc.running && oc.pids && oc.pids.length) {
+    msg += '\n\n警告：检测到现有 OpenCode 进程（PID ' + oc.pids.join(', ') + '），启动前会强制结束这些进程。';
+  } else if (oc.running) {
+    msg += '\n\n警告：检测到现有 OpenCode 进程，启动前会强制结束。';
+  } else {
+    msg += '\n\n如果启动瞬间检测到现有 OpenCode 进程，也会先强制结束。';
+  }
+  msg += '\n\n是否继续？';
+  if (!confirm(msg)) return;
+  const btn = $('#btnStartOpencode');
+  btn.disabled = true;
+  try {
+    const r = await api('/api/opencode/start', 'POST', {});
+    toast(r.message || (r.ok ? '已启动 OpenCode' : '启动失败'));
+    setTimeout(refresh, 1200);
+    setTimeout(refresh, 3500);
+  } catch(e) {
+    toast('启动 OpenCode 失败：' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function loadConfig(){
+  const d = await api('/api/config');
+  cfgData = d.config;
+  const c = d.config;
+  $('#fBackend').value = c.backend || 'auto';
+  $('#fPath').value = c.backend_path || '';
+  $('#fCustom').value = c.custom_command || '';
+  $('#fPlusArgs').value = c.warp_plus_args || '';
+  $('#fMirror').value = c.builtin_mirror || '';
+  $('#fSocks').value = c.socks_port;
+  $('#fHttp').value = c.http_port;
+  $('#fInterval').value = c.probe_interval;
+  $('#fTimeout').value = c.probe_timeout;
+  $('#fVerify').checked = !!c.verify_ssl;
+  $('#fAuto').checked = !!c.auto_rotate;
+  $('#fFail').value = c.rotate_after_failures;
+  $('#fMinutes').value = c.rotate_after_minutes;
+  $('#fWatchLog').value = c.watch_log || '';
+  $('#fWatchPattern').value = c.watch_pattern || '';
+  $('#fZen').checked = !!c.zen_enabled;
+  $('#fZenWarp').checked = !!c.zen_force_warp;
+  $('#fAutoStartOpencode').checked = !!c.auto_start_opencode;
+  $('#fZenPath').value = c.zen_path || '';
+  $('#fZenPort').value = c.zen_port;
+  $('#fZenData').value = c.zen_data_dir || '';
+  setText('saveInfo', '配置文件：' + d.config_path);
+}
+
+async function saveConfig(){
+  const body = {
+    backend: $('#fBackend').value,
+    backend_path: $('#fPath').value.trim(),
+    custom_command: $('#fCustom').value.trim(),
+    warp_plus_args: $('#fPlusArgs').value.trim(),
+    builtin_mirror: $('#fMirror').value.trim(),
+    socks_port: Number($('#fSocks').value),
+    http_port: Number($('#fHttp').value),
+    probe_interval: Number($('#fInterval').value),
+    probe_timeout: Number($('#fTimeout').value),
+    verify_ssl: $('#fVerify').checked,
+    auto_rotate: $('#fAuto').checked,
+    rotate_after_failures: Number($('#fFail').value),
+    rotate_after_minutes: Number($('#fMinutes').value),
+    watch_log: $('#fWatchLog').value.trim(),
+    watch_pattern: $('#fWatchPattern').value.trim(),
+    zen_enabled: $('#fZen').checked,
+    zen_force_warp: $('#fZenWarp').checked,
+    auto_start_opencode: $('#fAutoStartOpencode').checked,
+    zen_path: $('#fZenPath').value.trim(),
+    zen_port: Number($('#fZenPort').value),
+    zen_data_dir: $('#fZenData').value.trim()
+  };
+  try {
+    const r = await api('/api/config', 'POST', body);
+    toast(r.message || '已保存');
+    setText('saveInfo', r.message || '已保存');
+    await refresh();
+  } catch(e) {
+    toast('保存失败：' + e.message);
+  }
+}
+
+async function detect(){
+  const info = $('#detectInfo');
+  info.textContent = '检测中…';
+  try {
+    const r = await api('/api/detect', 'POST', {});
+    const list = $('#detectList');
+    list.innerHTML = '';
+    if (!r.backends.length) {
+      list.textContent = '未检测到任何后端。可选择“内置 warp-plus”，程序会自动下载。';
+      info.textContent = '';
+      return;
+    }
+    for (const b of r.backends) {
+      const div = document.createElement('div');
+      const label = b.key === 'builtin' ? '内置 warp-plus' : b.key;
+      div.innerHTML = '<b>' + label + '</b> · ' + b.version +
+        '<br><span style="color:#61708a">' + b.path + '</span>';
+      list.appendChild(div);
+    }
+    info.textContent = '共检测到 ' + r.backends.length + ' 项';
+    if (!$('#fPath').value && r.backends[0].key !== 'builtin') {
+      $('#fPath').value = r.backends[0].path;
+    }
+  } catch(e) {
+    info.textContent = '检测失败：' + e.message;
+  }
+}
+
+async function downloadBuiltin(){
+  try {
+    const r = await api('/api/builtin-download', 'POST', {});
+    toast(r.message || '已开始下载');
+    $$('.tab').forEach(x => x.classList.remove('active'));
+    $$('.page').forEach(x => x.classList.remove('active'));
+    document.querySelector('.tab[data-tab="log"]').classList.add('active');
+    $('#page-log').classList.add('active');
+  } catch(e) {
+    toast('下载失败：' + e.message);
+  }
+}
+
+function copyFrom(id){
+  const el = document.getElementById(id);
+  if (!el) return;
+  const text = el.textContent;
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(() => toast('已复制'), () => toast('复制失败，请手动选择'));
+  } else {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); toast('已复制'); } catch(e) { toast('复制失败'); }
+    document.body.removeChild(ta);
+  }
+}
+
+$$('.tab').forEach(t => t.addEventListener('click', () => {
+  $$('.tab').forEach(x => x.classList.remove('active'));
+  $$('.page').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  $('#page-' + t.dataset.tab).classList.add('active');
+  if (t.dataset.tab === 'models') loadModels(false).catch(() => {});
+}));
+
+$$('.copy').forEach(b => b.addEventListener('click', () => copyFrom(b.dataset.copy)));
+$('#btnStart').addEventListener('click', () => act('start'));
+$('#btnStop').addEventListener('click', () => act('stop'));
+$('#btnRotate').addEventListener('click', () => act('rotate'));
+$('#btnDetect').addEventListener('click', detect);
+$('#btnBuiltin').addEventListener('click', downloadBuiltin);
+$('#btnSave').addEventListener('click', saveConfig);
+$('#btnClear').addEventListener('click', () => { $('#logBox').innerHTML = ''; });
+$('#btnModelsRefresh').addEventListener('click', () => loadModels(true));
+$('#btnModelTest').addEventListener('click', runModelTest);
+$('#modelSearch').addEventListener('input', () => { if (modelsCache) renderModelsTable(); });
+$('#btnStartOpencode').addEventListener('click', startOpencode);
+$('#btnTip').addEventListener('click', showTip);
+$('#tipClose').addEventListener('click', hideTip);
+$('#tipOk').addEventListener('click', hideTip);
+$('#tipModal').addEventListener('click', e => { if (e.target === $('#tipModal')) hideTip(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') hideTip(); });
+
+(async function init(){
+  renderDownloads();
+  maybeShowDailyTip();
+  await loadConfig().catch(e => toast('读取配置失败：' + e.message));
+  await refresh();
+  await pollLogs();
+  setInterval(refresh, 2000);
+  setInterval(pollLogs, 2000);
+})();
+</script>
+</body>
+</html>

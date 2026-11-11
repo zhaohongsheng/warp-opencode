@@ -1,0 +1,94 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "free": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "free-router",
+      "options": {
+        "baseURL": "http://127.0.0.1:8899/v1",
+        "apiKey": "router"
+      },
+      "models": {
+        "auto": {
+          "name": "auto"
+        },
+        "zen": {
+          "name": "zen"
+        },
+        "local": {
+          "name": "local"
+        },
+        "zen/flint-40b-free": {
+          "name": "zen/flint-40b-free"
+        },
+        "zen/mimo-v2.6-flash-free": {
+          "name": "zen/mimo-v2.6-flash-free"
+        },
+        "zen/nemotron-3.5-super-vl-free": {
+          "name": "zen/nemotron-3.5-super-vl-free"
+        },
+        "zen/nemotron-3.5-lightning-free": {
+          "name": "zen/nemotron-3.5-lightning-free"
+        },
+        "zen/deepseek-v4.1-flash-free": {
+          "name": "zen/deepseek-v4.1-flash-free"
+        },
+        "zen/glm-5.3-flash-free": {
+          "name": "zen/glm-5.3-flash-free"
+        },
+        "zen/iceman-free": {
+          "name": "zen/iceman-free"
+        },
+        "zen/inkling-2-small-free": {
+          "name": "zen/inkling-2-small-free"
+        },
+        "zen/crouton-alpha-free": {
+          "name": "zen/crouton-alpha-free"
+        },
+        "zen/beam-free": {
+          "name": "zen/beam-free"
+        },
+        "zen/kilo-auto/free": {
+          "name": "zen/kilo-auto/free"
+        },
+        "zen/nvidia/nemotron-3.5-super-vl:free": {
+          "name": "zen/nvidia/nemotron-3.5-super-vl:free"
+        },
+        "zen/reflection/beam-free": {
+          "name": "zen/reflection/beam-free"
+        },
+        "zen/stealth/glyph-cluster": {
+          "name": "zen/stealth/glyph-cluster"
+        },
+        "zen/liquid/lfm-3-1.7b:free": {
+          "name": "zen/liquid/lfm-3-1.7b:free"
+        },
+        "zen/stealth/crouton-alpha": {
+          "name": "zen/stealth/crouton-alpha"
+        },
+        "zen/dots-studio/dots-3-note-preview:free": {
+          "name": "zen/dots-studio/dots-3-note-preview:free"
+        },
+        "zen/nvidia/nemotron-3.5-lightning:free": {
+          "name": "zen/nvidia/nemotron-3.5-lightning:free"
+        },
+        "zen/cohere/north-mini-code:free": {
+          "name": "zen/cohere/north-mini-code:free"
+        },
+        "zen/nvidia/nemotron-3-ultra-550b-a55b:free": {
+          "name": "zen/nvidia/nemotron-3-ultra-550b-a55b:free"
+        },
+        "zen/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": {
+          "name": "zen/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+        },
+        "zen/openrouter/free": {
+          "name": "zen/openrouter/free"
+        },
+        "local/qwen3-coder:30b": {
+          "name": "local/qwen3-coder:30b"
+        }
+      }
+    }
+  },
+  "model": "free/auto"
+}
