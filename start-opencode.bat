@@ -13,7 +13,7 @@ rem Override the address with:  set OPENCODE_PROXY=http://127.0.0.1:1080
 rem ---------------------------------------------------------------------------
 
 set "PROXY_PORT="
-for /f "tokens=2 delims=:," %%P in ('findstr /i http_port "%~dp0config\config.json" 2^>nul') do set "PROXY_PORT=%%P"
+for /f "tokens=2 delims=:," %%P in ('findstr /i http_port "config\config.json" 2^>nul') do set "PROXY_PORT=%%P"
 if defined PROXY_PORT set "PROXY_PORT=%PROXY_PORT: =%"
 if defined PROXY_PORT set "PROXY_PORT=%PROXY_PORT:}=%"
 if defined PROXY_PORT set "PROXY_PORT=%PROXY_PORT:"=%"
@@ -47,8 +47,10 @@ if not defined OPENCODE_PROXY (
     )
 )
 
+rem All project paths are relative to the script directory (set by cd above),
+rem so the folder can be renamed / moved / copied without breaking anything.
 rem opencode 的项目配置也统一放在 config 目录下。
-set "OPENCODE_CONFIG=%~dp0config\opencode.json"
+set "OPENCODE_CONFIG=config\opencode.json"
 if not exist "%OPENCODE_CONFIG%" (
     echo [warn] Missing %OPENCODE_CONFIG% - opencode will use defaults.
     echo.

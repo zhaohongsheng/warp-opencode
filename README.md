@@ -151,10 +151,10 @@ export HTTPS_PROXY=http://127.0.0.1:7891
 opencode
 ```
 
-也可以直接使用仓库里的 `start-opencode.bat`：它会从 `config.json` 读取 `http_port`，自动设置大小写两套代理变量与 `ALL_PROXY`，并保留 `NO_PROXY` 以放行本机流量。
+也可以直接使用仓库里的 `start-opencode.bat`：它会从 `config/config.json` 读取 `http_port`，自动设置大小写两套代理变量与 `ALL_PROXY`，并保留 `NO_PROXY` 以放行本机流量。
 
 ```bat
-:: 使用 config.json 中的 http_port
+:: 使用 config/config.json 中的 http_port
 start-opencode.bat
 
 :: 临时覆盖代理地址
@@ -170,7 +170,7 @@ start-opencode.bat
 
 ### 模型 Provider 示例
 
-仓库根目录的 `opencode.json` 是一个 OpenAI 兼容 provider 的示例配置，可把 `baseURL` 指向 zen-gate 或其他本地网关：
+`config/opencode.json` 是一个 OpenAI 兼容 provider 的示例配置，可把 `baseURL` 指向 zen-gate 或其他本地网关：
 
 ```json
 {
@@ -181,7 +181,7 @@ start-opencode.bat
       "name": "free-router",
       "options": {
         "baseURL": "http://127.0.0.1:8788/v1",
-        "apiKey": "你的 zen-gate 主密钥"
+        "apiKey": "{file:zen-gate.key}"
       },
       "models": {
         "auto": { "name": "auto" }
@@ -192,7 +192,11 @@ start-opencode.bat
 }
 ```
 
-> 请按实际网关地址和密钥调整，不要直接照抄仓库中的示例值。
+`{file:zen-gate.key}` 是 opencode 的变量替换语法，路径相对于配置文件所在目录，读取 `config/zen-gate.key` 的内容作为 API Key。
+
+- `config/zen-gate.key` 已被 `.gitignore` 忽略，不会把主密钥提交到版本库；
+- WARP Control 启动 zen-gate 时会自动把主密钥写入该文件，无需手动创建；
+- 也可以直接写明文密钥，但那样就有泄露风险，不建议提交到仓库。
 
 ## WARP 后端
 
@@ -214,7 +218,7 @@ warp-cli --accept-tos registration new
 **usque 首次使用**：
 
 ```bash
-usque -c "path/to/config.json" register -a
+bin\usque.exe -c "config\usque\config.json" register -a
 ```
 
 **内置后端下载失败**：在「设置」里填写下载镜像（如 `https://ghfast.top`），或手动下载 `warp-plus` 放到 `bin/` 目录。
@@ -248,13 +252,23 @@ opencode 侧把 provider 的 `baseURL` 指向 `http://127.0.0.1:8788/v1`，API K
 
 ## 配置项
 
-配置文件为程序目录下的 `config.json`，也可以在 Web 控制台「设置」页修改。修改端口或 zen-gate 相关配置后需要重启 WARP Control 才会生效。
+配置文件为程序目录下的 `config/config.json`，也可以在 Web 控制台「设置」页修改。修改端口或 zen-gate 相关配置后需要重启 WARP Control 才会生效。
+
+### 路径约定（重要）
+
+项目内所有路径一律**相对项目根目录**存放：`backend_path`、`usque_config`、`zen_path`、`zen_data_dir`、`watch_log`，以及两个启动脚本里的路径。整个目录可以随意改名、移动、复制，不会因为配置里残留旧目录的绝对路径而启动失败。
+
+- 控制台日志里的启动命令、错误提示、`/api/config` 返回的路径都显示为相对路径；绝对路径只在运行时由 `warp_control.py` 所在目录现算，**不会写进配置文件**。
+- 从旧版本升级时，配置中残留的绝对路径（例如 `F:\xxx\warp-control\bin\usque.exe`）会在启动时自动转为相对路径并回写一次，日志会提示「配置中的绝对路径已转为相对路径」。
+- 例外：系统级外部程序的位置无法相对化，仍按绝对路径处理 —— `warp-cli` 的系统安装位置、`start.bat` 探测 Python 安装位置、以及用户主动填写的项目外程序 / 日志路径。
+- 启动脚本用 `cd /d "%~dp0"` 把当前目录切到脚本所在目录，之后全部使用相对路径；`%~dp0` 是动态基准，不包含写死的盘符或目录名。
 
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
 | `backend` | `auto` | 后端类型：`auto` / `builtin` / `warp-cli` / `warp-plus` / `usque` / `custom` |
-| `backend_path` | `""` | 后端程序路径，留空则自动查找 |
-| `usque_config` | `""` | usque 配置文件路径，留空使用 `usque/config.json` |
+| `backend_path` | `""` | 后端程序路径，相对项目根目录（如 `bin/usque.exe`）；留空则自动查找 |
+| `usque_config` | `""` | usque 配置文件路径，相对项目根目录；留空使用 `config/usque/config.json` |
+| `usque_endpoint` | `""` | 指定 MASQUE 端点 IP；启动后端时写入 usque 配置的 `endpoint_v4` / `endpoint_h2_v4`，留空则沿用注册时的端点 |
 | `socks_port` | `40000` | 上游 SOCKS5 端口 |
 | `http_port` | `7891` | 本地 HTTP 代理端口 |
 | `probe_interval` | `20` | 出口探测间隔（秒） |
@@ -265,12 +279,12 @@ opencode 侧把 provider 的 `baseURL` 指向 `http://127.0.0.1:8788/v1`，API K
 | `custom_command` | `""` | 自定义后端命令，`{port}` 会替换为 SOCKS5 端口 |
 | `warp_plus_args` | `""` | 传给 warp-plus 的额外参数，如 `--gool --scan` |
 | `builtin_mirror` | `""` | 内置后端下载镜像前缀 |
-| `watch_log` | `""` | 要监控的 opencode 日志文件路径 |
+| `watch_log` | `""` | 要监控的 opencode 日志文件路径，相对项目根目录 |
 | `watch_pattern` | 见下方 | 日志封禁关键词正则 |
 | `verify_ssl` | `true` | 探测时是否校验证书 |
 | `zen_enabled` | `true` | 是否随 WARP 启停 zen-gate |
-| `zen_path` | `bin/zen-gate.exe` | zen-gate 程序路径，相对路径按程序目录解析 |
-| `zen_data_dir` | `""` | zen-gate 数据目录，留空使用其默认目录 |
+| `zen_path` | `bin/zen-gate.exe` | zen-gate 程序路径，相对项目根目录 |
+| `zen_data_dir` | `""` | zen-gate 数据目录，可填相对项目根目录的路径；留空使用其默认目录 |
 | `zen_port` | `8788` | zen-gate 监听端口 |
 | `zen_force_warp` | `true` | 是否强制 zen-gate 走 WARP 出口 |
 
@@ -323,26 +337,28 @@ python warp_control.py [--host 127.0.0.1] [--port 8787] [--no-browser] [--export
 ```text
 warp-control/
 ├─ warp_control.py          # 主程序（控制台 + 代理桥 + 后端托管）
-├─ config.json              # 运行配置
-├─ opencode.json            # opencode provider 示例
+├─ config/                  # 所有配置统一放这里
+│  ├─ config.json           # 运行配置
+│  ├─ opencode.json         # opencode provider 配置
+│  ├─ zen-gate.key          # zen-gate 主密钥（自动生成，不入库）
+│  └─ usque/config.json     # usque 注册配置（含设备密钥，不入库）
 ├─ start.bat                # Windows 一键启动（自动寻找 Python）
 ├─ start-opencode.bat       # 带代理环境变量启动 opencode
+├─ start-with-opencode.bat  # 启动控制台并在 WARP 就绪后自动拉起 opencode
+├─ asset/                   # 打赏二维码等静态资源
 ├─ preview.html             # 静态界面预览
 ├─ bin/                     # 内置后端 / zen-gate / opencode 可执行文件
 │  ├─ warp-plus.exe
 │  ├─ usque.exe
 │  ├─ zen-gate.exe
 │  └─ opencode.exe
-├─ usque/
-│  └─ config.json           # usque 注册配置
-└─ zen-gate/                # zen-gate 源码与资源（独立项目）
 ```
 
 ## 常见问题
 
 **找不到 Python / `start.bat` 一闪而过**
 
-安装 Python 3.8+ 并勾选 Add Python to PATH，然后在终端里运行 `python warp_control.py` 查看具体报错。
+`start.bat` 会先探测 Python，找不到会自动下载 3.12.10 并静默安装（用户级、无需管理员）；若自动安装失败，再手动安装 Python 3.8+ 并勾选 Add Python to PATH，然后在终端里运行 `python warp_control.py` 查看具体报错。
 
 **内置后端下载失败**
 
@@ -355,6 +371,10 @@ set WARP_GH_MIRROR=https://ghfast.top/
 start.bat
 ```
 
+**启动失败：`[WinError 2] 系统找不到指定的文件`**
+
+几乎都是配置里残留了旧目录的绝对路径，导致目录改名 / 移动 / 复制后 exe 仍指向原位置，甚至出现「exe 在旧目录、配置在新目录」的串台。检查 `config/config.json` 的 `backend_path` 是否为相对路径（如 `bin\usque.exe`）；程序启动时会自动把绝对路径规范化并回写一次。也可对照控制台日志里的「启动命令」，现在它显示为相对路径，一眼就能看出路径是否落在当前目录。
+
 **`warp-cli connect` 失败**
 
 先完成注册：`warp-cli --accept-tos registration new`。另外 `warp-cli` 代理模式不能与系统全局 WARP 模式同时占用。
@@ -365,7 +385,11 @@ start.bat
 
 **usque 一直重连 / MASQUE 连接超时**
 
-检查 `usque/config.json` 里的 `endpoint_v4`。部分网络会屏蔽 `162.159.198.2`，可改成同一网段内可达的端点，例如 `162.159.198.1`，保存后重启 WARP Control。修改端点不会影响已注册的账号信息。
+日志出现 `Failed to connect tunnel: ... no recent network activity`、探测连续 `urlopen error timed out` 时，说明隧道根本没建立，换 IP 多少次都没用。
+
+部分网络会屏蔽注册时分配的 `162.159.198.2`。在 `config/config.json` 里设置 `usque_endpoint` 为同网段可达端点（本机实测 `162.159.198.1` 可用），重启 WARP Control 即可；程序每次启动后端都会把它写进 `config/usque/config.json`，重新注册后也不会退回去。修改端点不会影响已注册的账号信息。
+
+排查端点可用 `usque.exe -c <临时配置副本> socks --bind 127.0.0.1 --port 40001`，再用 `curl --socks5-hostname 127.0.0.1:40001 https://www.cloudflare.com/cdn-cgi/trace` 验证，返回 `warp=on` 即为可用。注意 TCP 通不代表 QUIC 通，别盲选 `--http2`。
 
 **opencode 仍然走直连**
 
@@ -374,6 +398,16 @@ start.bat
 **zen-gate 一直 429**
 
 确认「自动换 IP」已开启；zen-gate 额度信号有 90 秒冷却，避免一轮 429 反复重启后端；若换 IP 后仍受限，可能是车道级门禁而非 IP 额度。
+
+**opencode 里 zen 的模型用不了**
+
+按顺序排查：
+
+1. `config/opencode.json` 的 `baseURL` 必须是 `http://127.0.0.1:8788/v1`（zen-gate 的实际端口），指向不存在的端口时 opencode 会直接报连接失败；
+2. `apiKey` 必须等于 zen-gate 的主密钥（`%APPDATA%\zen-gate\config.json` 的 `mainKey`），密钥错误会返回 `401 invalid API key`；推荐写成 `{file:zen-gate.key}`，由 WARP Control 自动同步；
+3. 控制台「模型」页显示 `throttled` / `FreeUsageLimitError` 表示 **OpenCode Zen 免费车道额度已耗尽**，不是 IP 被封；在 zen-gate 面板开启「通道回落到提供商」（`laneFallbackToProviders`）后，调用这些模型会自动改用 kilo / openrouter 免费通道，实测仍可正常对话；
+4. `beam-free` 报 `RegionError` 属于地区限制，换 IP 不一定能绕过；
+5. 改完配置要重启 opencode（关闭终端重新执行 `start-opencode.bat`）才会生效。
 
 **探测报证书错误**
 

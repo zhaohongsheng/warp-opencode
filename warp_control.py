@@ -43,11 +43,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_DIR = os.path.join(APP_DIR, "config")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
+CONFIG_REL = os.path.join("config", "config.json")
 
 DEFAULT_CONFIG = {
     "backend": "auto",
     "backend_path": "",
     "usque_config": "",
+    # 留空 = 沿用 usque 配置文件里的端点。部分网络会屏蔽注册时分配的
+    # 162.159.198.2，这里可指定同网段可达端点（如 162.159.198.1），
+    # 每次启动后端时写入 usque 配置，避免重新注册后又变回被屏蔽的地址。
+    "usque_endpoint": "",
     "socks_port": 40000,
     "http_port": 7891,
     "probe_interval": 20,
@@ -71,9 +76,89 @@ DEFAULT_CONFIG = {
     "zen_port": 8788,
     # 接管/拉起 zen-gate 时，把它的出口切到 WARP 的 HTTP 代理（停止时还原）。
     "zen_force_warp": True,
-    # WARP 启动并探测成功后，自动通过 start-opencode.bat 启动 OpenCode（会结束现有 opencode 进程）。
+    # WARP 启动并探测成功后，自动通过 start-opencode.bat 启动 OpenCode
+    # （已运行则直接复用，不会强制结束用户打开的 opencode）。
     "auto_start_opencode": False,
 }
+
+# --------------------------------------------------------------------------- #
+# 路径约定：项目内的一切路径都相对 APP_DIR 存放。
+#
+# 目录被改名 / 移动 / 复制后，写死的绝对路径仍指向旧位置，Popen 会直接抛
+# WinError 2，甚至出现「exe 在旧目录、配置在新目录」的串台。因此配置读写、
+# 启动解析、日志展示都统一走下面这组函数：相对路径落盘，绝对路径只在
+# 运行时由 __file__ 现算，绝不持久化。
+# --------------------------------------------------------------------------- #
+
+PATH_FIELDS = (
+    "backend_path", "usque_config", "zen_path", "zen_data_dir", "watch_log",
+)
+# 旧版配置里绝对路径的锚点（项目内目录）
+_PATH_ANCHORS = ("bin", "config", "asset")
+
+
+def to_rel_path(path):
+    """把项目内路径统一成相对 APP_DIR 的写法。
+
+    - 相对路径：仅规范化分隔符，不拼接 APP_DIR。
+    - 当前 APP_DIR 内的绝对路径：转成 relpath。
+    - 另一份副本目录里的绝对路径（改名/移动前留下的旧值）：按 bin/
+      config/ asset/ 锚点提取项目内层级，映射到当前 APP_DIR。
+    - 项目外的绝对路径（如用户自己指定的外部程序）：原样保留。
+    """
+    p = (path or "").strip().strip('"').strip("'")
+    if not p or "://" in p:
+        return p
+    norm = os.path.normpath(p)
+    if os.path.isabs(norm):
+        app = os.path.normcase(os.path.abspath(APP_DIR))
+        nc = os.path.normcase(norm)
+        if nc == app or nc.startswith(app + os.sep):
+            rel = os.path.relpath(norm, APP_DIR)
+        else:
+            parts = nc.replace("\\", "/").split("/")
+            anchor = -1
+            for i, seg in enumerate(parts[:-1]):
+                if seg in _PATH_ANCHORS:
+                    anchor = i
+                    break
+            if anchor < 0:
+                return p  # 项目外路径，无法相对化，原样保留
+            rel = "/".join(parts[anchor:])
+    else:
+        rel = norm
+    return rel.replace("/", os.sep)
+
+
+def normalize_path_fields(cfg):
+    """就地规范化配置里的路径字段，返回是否发生了改动。"""
+    changed = False
+    for key in PATH_FIELDS:
+        old = cfg.get(key) or ""
+        new = to_rel_path(old)
+        if new != old:
+            cfg[key] = new
+            changed = True
+    return changed
+
+
+def show_cmd(cmd):
+    """日志展示用：把命令里的项目内绝对路径显示为相对路径。"""
+    if isinstance(cmd, (list, tuple)):
+        return " ".join(to_rel_path(str(x)) for x in cmd)
+    out = []
+    for tok in re.split(r"(\s+)", str(cmd)):
+        if not tok or tok.isspace():
+            out.append(tok)
+            continue
+        pre, core, post = "", tok, ""
+        while core[:1] in ('"', "'"):
+            pre, core = pre + core[0], core[1:]
+        while core[-1:] in ('"', "'"):
+            post, core = core[-1] + post, core[:-1]
+        out.append(pre + to_rel_path(core) + post)
+    return "".join(out)
+
 
 # 两次“限额触发换 IP”之间的最小间隔，避免一整轮 429 把后端反复重启。
 ZEN_ROTATE_COOLDOWN = 90.0
@@ -145,19 +230,27 @@ class Logger:
 
 def load_config():
     cfg = dict(DEFAULT_CONFIG)
+    migrated = False
     try:
         if os.path.isfile(CONFIG_PATH):
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict):
                 cfg.update({k: v for k, v in data.items() if k in DEFAULT_CONFIG})
+                migrated = normalize_path_fields(cfg)
     except Exception as e:
         log_print("读取配置失败，使用默认值：%s" % e)
+    if migrated:
+        # 老配置里的绝对路径（可能指向改名/移动前的旧目录）自动迁移一次，
+        # 回写后以后启动都只认相对路径。
+        save_config(cfg)
+        log_print("配置中的绝对路径已转为相对路径并回写：%s" % CONFIG_REL)
     return cfg
 
 
 def save_config(cfg):
     try:
+        normalize_path_fields(cfg)
         os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
@@ -347,28 +440,28 @@ def opencode_status(http_port):
 
 
 def start_opencode_process(logger, http_port):
-    """结束现有 opencode 进程，并在新控制台中按 start-opencode.bat 启动。"""
-    before = opencode_status(http_port)
-    killed = []
-    for pid in before.get("pids") or []:
-        logger.add("启动 OpenCode 前结束现有进程 PID %d" % pid, "warn")
-        if _kill_pid(pid):
-            killed.append(pid)
-    if killed:
-        deadline = time.time() + 4
-        while time.time() < deadline:
-            if not opencode_status(http_port).get("pids"):
-                break
-            time.sleep(0.25)
+    """通过 start-opencode.bat 在新控制台启动 OpenCode。
 
+    绝不结束用户已经打开的 opencode：检测到已有实例时直接复用现有窗口，
+    跳过本次启动。自动启动与控制台按钮都走这里，两条路径都不会强杀。
+    """
+    before = opencode_status(http_port)
+    existing = before.get("pids") or []
     bat = os.path.join(APP_DIR, "start-opencode.bat")
+    if existing:
+        msg = ("检测到 OpenCode 已在运行（PID %s），复用现有窗口，跳过启动；"
+               "不会结束现有进程" % ", ".join(str(p) for p in existing))
+        logger.add(msg)
+        return {"ok": True, "message": msg, "skipped": True,
+                "killed": [], "path": bat}
+
     exe = os.path.join(APP_DIR, "bin", "opencode.exe")
     if not os.path.isfile(bat):
         msg = "未找到启动脚本：%s" % bat
         if not os.path.isfile(exe):
             msg += "（且未找到 %s）" % exe
         logger.add(msg, "error")
-        return {"ok": False, "message": msg, "killed": killed, "path": bat}
+        return {"ok": False, "message": msg, "killed": [], "path": bat}
 
     try:
         if os.name == "nt":
@@ -392,13 +485,11 @@ def start_opencode_process(logger, http_port):
     except Exception as e:
         msg = "通过 start-opencode.bat 启动 OpenCode 失败：%s" % e
         logger.add(msg, "error")
-        return {"ok": False, "message": msg, "killed": killed, "path": bat}
+        return {"ok": False, "message": msg, "killed": [], "path": bat}
 
     msg = "已通过 start-opencode.bat 启动 OpenCode（新窗口）"
-    if killed:
-        msg += "；已结束旧进程 %s" % ", ".join(str(p) for p in killed)
     logger.add(msg)
-    return {"ok": True, "message": msg, "killed": killed, "path": bat}
+    return {"ok": True, "message": msg, "killed": [], "path": bat}
 
 
 def reclaim_port(port, allowed_names, logger, force=False):
@@ -495,11 +586,16 @@ def find_exec(names, extra_paths=()):
 
 
 def app_path(path):
-    """把配置里的相对路径解析到程序目录；空值返回空串。"""
+    """把配置里的路径解析到当前程序目录；项目外的绝对路径原样保留。
+
+    即使内存里残留指向旧目录/副本的绝对路径，也会先规范化成相对路径再
+    拼到当前 APP_DIR，保证目录改名或复制后不会跑到别的目录去启动 exe。
+    """
     path = (path or "").strip()
-    if not path:
-        return ""
-    return path if os.path.isabs(path) else os.path.join(APP_DIR, path)
+    if not path or "://" in path:
+        return path
+    rel = to_rel_path(path)
+    return rel if os.path.isabs(rel) else os.path.join(APP_DIR, rel)
 
 
 def detect_backends(include_builtin=False):
@@ -961,6 +1057,9 @@ class BaseBackend:
             errors="replace",
             bufsize=1,
             shell=shell,
+            # 子进程的当前目录固定为项目根：脚本里可以放心用相对路径，
+            # usque 默认读当前目录 config.json 的行为也不会跑偏。
+            cwd=APP_DIR,
         )
         if os.name == "nt":
             kwargs["creationflags"] = NO_WINDOW | NEW_GROUP
@@ -1121,7 +1220,7 @@ class WarpPlusBackend(BaseBackend):
             except ValueError as e:
                 return False, "warp-plus 额外参数解析失败：%s" % e
 
-        self.log.add("启动命令：%s" % " ".join(cmd))
+        self.log.add("启动命令：%s" % show_cmd(cmd))
         try:
             self._spawn(cmd)
         except Exception as e:
@@ -1182,8 +1281,8 @@ class UsqueBackend(BaseBackend):
         self.path = path
 
     def config_path(self):
-        return app_path((self.cfg.get("usque_config") or "").strip()) or os.path.join(
-            APP_DIR, "config", "usque", "config.json"
+        return app_path((self.cfg.get("usque_config") or "").strip()) or app_path(
+            os.path.join("config", "usque", "config.json")
         )
 
     def start(self):
@@ -1193,9 +1292,28 @@ class UsqueBackend(BaseBackend):
         if not os.path.isfile(cfg_path):
             return False, (
                 "未找到 usque 配置：%s\n"
-                "首次使用需注册一次，请执行：\n"
-                "  \"%s\" -c \"%s\" register -a" % (cfg_path, self.path, cfg_path)
+                "首次使用需注册一次，请在项目根目录执行：\n"
+                "  \"%s\" -c \"%s\" register -a" % (
+                    to_rel_path(cfg_path), to_rel_path(self.path), to_rel_path(cfg_path)
+                )
             )
+
+        endpoint = (self.cfg.get("usque_endpoint") or "").strip()
+        if endpoint:
+            try:
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    ucfg = json.load(f)
+                changed = []
+                for key in ("endpoint_v4", "endpoint_h2_v4"):
+                    if key in ucfg and ucfg[key] != endpoint:
+                        ucfg[key] = endpoint
+                        changed.append(key)
+                if changed:
+                    with open(cfg_path, "w", encoding="utf-8") as f:
+                        json.dump(ucfg, f, ensure_ascii=False, indent=2)
+                    self.log.add("usque 端点已设为 %s（%s）" % (endpoint, ", ".join(changed)))
+            except Exception as e:
+                return False, "无法写入 usque 端点 %s：%s" % (endpoint, e)
 
         ok, msg = self._prepare_port(port, ("usque", "usque.exe"))
         if not ok:
@@ -1207,7 +1325,7 @@ class UsqueBackend(BaseBackend):
             self.path, "-c", cfg_path, "socks",
             "--bind", "127.0.0.1", "--port", str(port),
         ]
-        self.log.add("启动命令：%s" % " ".join(cmd))
+        self.log.add("启动命令：%s" % show_cmd(cmd))
         try:
             self._spawn(cmd)
         except Exception as e:
@@ -1252,7 +1370,7 @@ class CustomBackend(BaseBackend):
             return False, msg
 
         cmd = self.command.replace("{port}", str(port))
-        self.log.add("启动命令：%s" % cmd)
+        self.log.add("启动命令：%s" % show_cmd(cmd))
         try:
             self._spawn(cmd, shell=True)
         except Exception as e:
@@ -1326,6 +1444,32 @@ def _zen_main_key(cfg, zen_mgr=None, port=None):
     return ""
 
 
+def sync_opencode_key(cfg, zen_mgr=None):
+    """把 zen-gate 的 mainKey 同步到 config/zen-gate.key。
+
+    config/opencode.json 里的 apiKey 写成 {file:zen-gate.key}，主密钥因此不会进版本库；
+    这里在 zen-gate 启动/接管后自动补齐该文件，避免 OpenCode 报 401 invalid API key。
+    返回 True 表示本次写入/更新了文件。
+    """
+    key = _zen_main_key(cfg, zen_mgr)
+    if not key:
+        return False
+    path = os.path.join(APP_DIR, "config", "zen-gate.key")
+    try:
+        if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                if f.read().strip() == key:
+                    return False
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(key)
+        return True
+    except Exception:
+        return False
+
+
 def zen_models_snapshot(cfg, zen_mgr=None):
     port = _zen_port(cfg, zen_mgr)
     base = "http://127.0.0.1:%d" % port
@@ -1355,12 +1499,16 @@ def zen_models_snapshot(cfg, zen_mgr=None):
     if not isinstance(channels, list):
         channels = []
     has_key = bool((state.get("mainKey") or "").strip() or _zen_main_key(cfg, zen_mgr, port))
+    settings = state.get("settings") or {}
+    if not isinstance(settings, dict):
+        settings = {}
     return {
         "ok": True,
         "port": port,
         "base_url": base + "/v1",
         "main_key_present": bool((state.get("mainKey") or "").strip()),
         "has_key": has_key,
+        "lane_fallback": bool(settings.get("laneFallbackToProviders")),
         "models": models,
         "stats": stats,
         "channels": channels,
@@ -1441,6 +1589,32 @@ def zen_test_model(cfg, zen_mgr, model, prompt="", max_tokens=64):
         return {"ok": False, "model": model, "ms": ms, "status": getattr(e, "code", None), "error": err}
     except Exception as e:
         return {"ok": False, "model": model, "ms": int((time.time() - started) * 1000), "error": str(e)}
+
+
+def zen_reprobe(cfg, zen_mgr=None):
+    """让 zen-gate 重新探测模型可用性（等价于面板上的“重新探测”按钮）。"""
+    port = _zen_port(cfg, zen_mgr)
+    req = urllib.request.Request(
+        "http://127.0.0.1:%d/admin/api/reprobe" % port,
+        data=b"{}",
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "warp-control/1.0",
+        },
+    )
+    try:
+        with _zen_local_opener().open(req, timeout=20) as resp:
+            raw = resp.read().decode("utf-8", "replace")
+        try:
+            body = json.loads(raw) if raw else {}
+        except Exception:
+            body = {"raw": raw[:300]}
+        return {"ok": True, "port": port, "result": body}
+    except urllib.error.HTTPError as e:
+        return {"ok": False, "port": port, "error": "HTTP %s" % getattr(e, "code", "?")}
+    except Exception as e:
+        return {"ok": False, "port": port, "error": str(e)}
 
 
 class ZenGate:
@@ -1687,7 +1861,7 @@ class ZenGate:
         if not exe:
             return False, (
                 "未找到 zen-gate（%s），跳过 OpenCode Zen 入口。"
-                "可在设置里填写 zen-gate.exe 路径" % (app_path(self.cfg.get("zen_path") or "") or "未配置")
+                "可在设置里填写 zen-gate.exe 路径" % (to_rel_path(self.cfg.get("zen_path") or "") or "未配置")
             )
 
         proxy = "http://127.0.0.1:%d" % int(self.cfg["http_port"])
@@ -1705,7 +1879,7 @@ class ZenGate:
             return False, "创建 zen-gate 数据目录失败：%s" % e
 
         cmd = [exe, "-no-tray", "-port", str(self.port)]
-        self.log.add("启动 zen-gate：%s（出口走 %s）" % (" ".join(cmd), proxy))
+        self.log.add("启动 zen-gate：%s（出口走 %s）" % (show_cmd(cmd), proxy))
         kwargs = dict(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -1989,14 +2163,15 @@ class App:
 
         threading.Thread(target=self._probe_loop, daemon=True).start()
         threading.Thread(target=self._watch_loop, daemon=True).start()
-        self.log.add("WARP Control 已启动，配置文件：%s" % CONFIG_PATH)
+        self.log.add("WARP Control 已启动，配置文件：%s" % CONFIG_REL)
 
     # -- 后端解析 -------------------------------------------------------- #
 
     def resolve_backend(self):
         cfg = self.cfg
         key = (cfg.get("backend") or "auto").lower()
-        path = (cfg.get("backend_path") or "").strip()
+        # 配置里存的是相对路径（或旧版遗留的绝对路径），一律按当前 APP_DIR 解析。
+        path = app_path(cfg.get("backend_path") or "")
 
         if key == "custom":
             return CustomBackend(self, cfg.get("custom_command") or "")
@@ -2042,7 +2217,8 @@ class App:
 
             self.backend = backend
             self.backend_name = backend.key
-            self.log.add("使用后端：%s（%s）" % (backend.key, getattr(backend, "path", "") or "内置命令"))
+            self.log.add("使用后端：%s（%s）" % (
+                backend.key, to_rel_path(getattr(backend, "path", "") or "") or "内置命令"))
 
             ok, msg = backend.start()
             if not ok:
@@ -2106,6 +2282,11 @@ class App:
         if not ok and zen.running():
             # 启动失败但端口已通：可能另一个实例刚好起来了，仍保留监控。
             self.log.add("zen-gate 未由本程序拉起，但端口已监听，继续监控", "warn")
+        try:
+            if sync_opencode_key(self.cfg, zen):
+                self.log.add("已同步 zen-gate 主密钥到 config/zen-gate.key（供 OpenCode 使用）")
+        except Exception:
+            pass
 
     def stop(self):
         with self.lock:
@@ -2328,17 +2509,18 @@ class App:
                 pass
 
     def _watch_once(self):
-        path = (self.cfg.get("watch_log") or "").strip()
+        rel = to_rel_path(self.cfg.get("watch_log") or "")
+        path = app_path(rel)
         pattern = (self.cfg.get("watch_pattern") or "").strip()
-        if not path or not pattern or not os.path.isfile(path):
+        if not rel or not pattern or not os.path.isfile(path):
             self._watch_path = ""
             self._watch_pos = None
             return
 
-        if path != self._watch_path:
-            self._watch_path = path
+        if rel != self._watch_path:
+            self._watch_path = rel
             self._watch_pos = os.path.getsize(path)
-            self.log.add("开始监控日志：%s" % path)
+            self.log.add("开始监控日志：%s" % rel)
 
         size = os.path.getsize(path)
         if self._watch_pos is None or size < self._watch_pos:
@@ -2502,7 +2684,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(APP.snapshot())
                 return
             if path == "/api/config":
-                self._json({"config": APP.cfg, "config_path": CONFIG_PATH})
+                self._json({"config": APP.cfg, "config_path": CONFIG_REL})
                 return
             if path == "/api/logs":
                 try:
@@ -2580,6 +2762,9 @@ class Handler(BaseHTTPRequestHandler):
                 prompt = body.get("prompt") or "Reply with exactly: OK"
                 max_tokens = body.get("max_tokens") or 64
                 self._json(zen_test_model(APP.cfg, getattr(APP, "zen", None), model, prompt, max_tokens))
+                return
+            if path == "/api/zen/reprobe":
+                self._json(zen_reprobe(APP.cfg, getattr(APP, "zen", None)))
                 return
             if path == "/api/opencode/start":
                 http_port = int(APP.cfg.get("http_port") or 7891)
@@ -2758,6 +2943,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
   .banner{margin-bottom:14px;padding:11px 14px;border-radius:10px;font-size:12.5px;display:none;
     border:1px solid rgba(248,113,113,.35);background:rgba(248,113,113,.08);color:#ffc9c9}
   .banner.show{display:block}
+  .banner.info{border-color:rgba(251,191,36,.35);background:rgba(251,191,36,.07);color:#ffe6a8}
   .mini{margin-top:6px}
   .mini .log-line{font-size:11.8px}
   .model-table{width:100%;border-collapse:collapse;font-size:12.5px}
@@ -2939,9 +3125,11 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <input type="text" id="modelSearch" placeholder="搜索模型 ID / 名称 / 渠道" style="background:#0a1119;border:1px solid var(--line);border-radius:8px;padding:7px 10px;color:var(--txt);font-size:12.5px;min-width:220px;outline:none">
         <button class="btn ghost" id="btnModelsRefresh">刷新</button>
+        <button class="btn ghost" id="btnModelsReprobe" title="让 zen-gate 重新探测各模型可用性（约需数十秒）">重新探测</button>
       </div>
     </div>
     <div class="banner" id="modelsErr"></div>
+    <div class="banner info" id="modelsNote"></div>
     <div class="stats" id="modelsStats" style="margin-bottom:14px"></div>
     <div class="cols" style="margin-bottom:14px">
       <div class="card">
@@ -3001,8 +3189,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
         </div>
         <div class="field">
           <label>程序路径（留空则自动查找）</label>
-          <input type="text" id="fPath" placeholder="例如 C:\Tools\warp-plus.exe">
-          <div class="tip">仅需在后端未加入 PATH 时填写。</div>
+          <input type="text" id="fPath" placeholder="例如 bin\usque.exe">
+          <div class="tip">相对项目根目录；目录改名或移动后仍有效，不要填绝对路径。</div>
         </div>
         <div class="field full">
           <label>自定义命令（可选，{port} 会替换为 SOCKS5 端口）</label>
@@ -3072,8 +3260,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
         </div>
         <div class="field full">
           <label>opencode 日志文件（可选）</label>
-          <input type="text" id="fWatchLog" placeholder="例如 C:\Users\you\.local\share\opencode\log\xxx.log">
-          <div class="tip">监控该文件新增内容，命中关键词即自动换 IP。</div>
+          <input type="text" id="fWatchLog" placeholder="例如 logs\opencode.log">
+          <div class="tip">相对项目根目录；监控该文件新增内容，命中关键词即自动换 IP。</div>
         </div>
         <div class="field full">
           <label>封禁关键词（正则，不区分大小写）</label>
@@ -3096,7 +3284,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         </div>
         <div class="field full">
           <label class="check"><input type="checkbox" id="fZenWarp"> 强制 zen-gate 走 WARP 出口（停止时还原原设置）</label>
-          <label class="check"><input type="checkbox" id="fAutoStartOpencode"> WARP 验证通过后自动启动 OpenCode（通过 <code>start-opencode.bat</code>；启动前会结束现有 opencode 进程，若已在运行则跳过）</label>
+          <label class="check"><input type="checkbox" id="fAutoStartOpencode"> WARP 验证通过后自动启动 OpenCode（通过 <code>start-opencode.bat</code>；不会强制结束已打开的 opencode，已在运行则直接复用）</label>
           <div class="tip">接管已在运行的实例时，会通过 zen-gate 的管理接口把代理模式改为
             <code>http://127.0.0.1:HTTP端口</code>；这样 Zen 免费额度按 WARP 出口 IP 计量。</div>
         </div>
@@ -3487,6 +3675,23 @@ function renderModelStats(data){
     ['累计输出 tokens', totalOut, '按 zen-gate 统计']
   ];
   box.innerHTML = cards.map(c => '<div class="stat"><div class="label">'+escHtml(c[0])+'</div><div class="value">'+escHtml(c[1])+'</div><div class="hint">'+escHtml(c[2])+'</div></div>').join('');
+  const note = $('#modelsNote');
+  if (note) {
+    const throttled = models.filter(m => String(m.state || '').toLowerCase() === 'throttled').length;
+    if (data.lane_fallback && throttled > 0) {
+      note.innerHTML = 'zen 免费通道当前有 <b>' + throttled + '</b> 个模型被限流（FreeUsageLimitError）。'
+        + 'zen-gate 已开启 <code>laneFallbackToProviders</code>，调用这些模型会自动回落到 kilo / openrouter 免费通道，仍然可以正常使用；'
+        + '下表状态是 zen 原始通道的探测结果，不代表最终不可用。';
+      note.classList.add('show');
+    } else if (!data.lane_fallback && throttled > 0) {
+      note.innerHTML = 'zen 免费通道当前有 <b>' + throttled + '</b> 个模型被限流，且未开启通道回落（laneFallbackToProviders）。'
+        + '在 zen-gate 面板设置里开启“通道回落到提供商”后，可自动改用 kilo / openrouter 免费通道。';
+      note.classList.add('show');
+    } else {
+      note.classList.remove('show');
+      note.innerHTML = '';
+    }
+  }
   const recent = (stats.recent || []).slice(-8).reverse();
   let html = '<div><b>今日</b>：请求 ' + (+day.requests||0) + '，失败 ' + (+day.failed||0) + '，输入 ' + (+day.input||0) + '，输出 ' + (+day.output||0) + '</div>';
   html += '<div><b>累计</b>：请求 ' + totalReq + '，失败 ' + totalFail + '，输入 tokens ' + Object.values(days).reduce((a,d)=>a+(+d.input||0),0) + '，输出 tokens ' + totalOut + '</div>';
@@ -3563,6 +3768,23 @@ async function loadModels(force){
     if (err) { err.textContent = '读取失败：' + e.message; err.classList.add('show'); }
   }
 }
+async function reprobeModels(){
+  const btn = $('#btnModelsReprobe');
+  const hint = $('#modelsHint');
+  btn.disabled = true;
+  if (hint) hint.textContent = '已请求 zen-gate 重新探测，约数十秒后自动刷新…';
+  try {
+    const r = await api('/api/zen/reprobe', 'POST', {});
+    if (!r.ok) throw new Error(r.error || '未知错误');
+    toast('已开始重新探测，稍后自动刷新');
+    setTimeout(() => loadModels(true), 25000);
+  } catch(e) {
+    toast('重新探测失败：' + e.message);
+    if (hint) hint.textContent = '重新探测失败：' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
 async function runModelTest(){
   const model = ($('#testModel').value || '').trim();
   if (!model) { toast('请输入或选择模型'); return; }
@@ -3596,13 +3818,11 @@ async function runModelTest(){
 
 async function startOpencode(){
   const oc = (currentStatus && currentStatus.opencode) ? currentStatus.opencode : {};
-  let msg = '将启动 OpenCode（通过 start-opencode.bat，新控制台窗口）。';
+  let msg = '将启动 OpenCode（通过 start-opencode.bat，新控制台窗口），不会强制结束任何已打开的 opencode。';
   if (oc.running && oc.pids && oc.pids.length) {
-    msg += '\n\n警告：检测到现有 OpenCode 进程（PID ' + oc.pids.join(', ') + '），启动前会强制结束这些进程。';
+    msg = '检测到 OpenCode 已在运行（PID ' + oc.pids.join(', ') + '），将直接复用现有窗口并跳过启动，不会结束这些进程。';
   } else if (oc.running) {
-    msg += '\n\n警告：检测到现有 OpenCode 进程，启动前会强制结束。';
-  } else {
-    msg += '\n\n如果启动瞬间检测到现有 OpenCode 进程，也会先强制结束。';
+    msg = '检测到 OpenCode 已在运行，将直接复用现有窗口并跳过启动，不会结束它。';
   }
   msg += '\n\n是否继续？';
   if (!confirm(msg)) return;
@@ -3755,6 +3975,7 @@ $('#btnBuiltin').addEventListener('click', downloadBuiltin);
 $('#btnSave').addEventListener('click', saveConfig);
 $('#btnClear').addEventListener('click', () => { $('#logBox').innerHTML = ''; });
 $('#btnModelsRefresh').addEventListener('click', () => loadModels(true));
+$('#btnModelsReprobe').addEventListener('click', reprobeModels);
 $('#btnModelTest').addEventListener('click', runModelTest);
 $('#modelSearch').addEventListener('input', () => { if (modelsCache) renderModelsTable(); });
 $('#btnStartOpencode').addEventListener('click', startOpencode);

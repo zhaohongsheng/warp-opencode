@@ -19,3 +19,7 @@ desktop.ini
 # usque device credentials (config/usque/config.json) - never commit
 config/usque/
 usque/
+
+# local secrets (e.g. zen-gate main key referenced by config/opencode.json)
+config/*.key
+*.key

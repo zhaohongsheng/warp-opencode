@@ -5,8 +5,8 @@
       "npm": "@ai-sdk/openai-compatible",
       "name": "free-router",
       "options": {
-        "baseURL": "http://127.0.0.1:8899/v1",
-        "apiKey": "router"
+        "baseURL": "http://127.0.0.1:8788/v1",
+        "apiKey": "{file:zen-gate.key}"
       },
       "models": {
         "auto": {

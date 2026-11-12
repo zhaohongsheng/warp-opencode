@@ -1,6 +1,6 @@
 {
   "backend": "usque",
-  "backend_path": "F:\\ctf\\ai\\warp-control\\bin\\usque.exe",
+  "backend_path": "bin\\usque.exe",
   "usque_config": "config\\usque\\config.json",
   "socks_port": 40000,
   "http_port": 7891,
@@ -20,5 +20,6 @@
   "zen_data_dir": "",
   "zen_port": 8788,
   "zen_force_warp": true,
-  "auto_start_opencode": true
+  "auto_start_opencode": true,
+  "usque_endpoint": "162.159.198.1"
 }

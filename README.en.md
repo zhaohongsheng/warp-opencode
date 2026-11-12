@@ -151,10 +151,10 @@ export HTTPS_PROXY=http://127.0.0.1:7891
 opencode
 ```
 
-You can also use the included `start-opencode.bat`. It reads `http_port` from `config.json`, sets both upper- and lower-case proxy variables plus `ALL_PROXY`, and keeps `NO_PROXY` so local traffic bypasses the proxy.
+You can also use the included `start-opencode.bat`. It reads `http_port` from `config/config.json`, sets both upper- and lower-case proxy variables plus `ALL_PROXY`, and keeps `NO_PROXY` so local traffic bypasses the proxy.
 
 ```bat
-:: Use http_port from config.json
+:: Use http_port from config/config.json
 start-opencode.bat
 
 :: Override the proxy address
@@ -170,7 +170,7 @@ If opencode still shows your direct egress IP:
 
 ### Model provider example
 
-The root `opencode.json` is a sample OpenAI-compatible provider configuration. Point `baseURL` at zen-gate or another local gateway:
+`config/opencode.json` is a sample OpenAI-compatible provider configuration. Point `baseURL` at zen-gate or another local gateway:
 
 ```json
 {
@@ -181,7 +181,7 @@ The root `opencode.json` is a sample OpenAI-compatible provider configuration. P
       "name": "free-router",
       "options": {
         "baseURL": "http://127.0.0.1:8788/v1",
-        "apiKey": "your zen-gate master key"
+        "apiKey": "{file:zen-gate.key}"
       },
       "models": {
         "auto": { "name": "auto" }
@@ -192,7 +192,11 @@ The root `opencode.json` is a sample OpenAI-compatible provider configuration. P
 }
 ```
 
-> Adjust the address and key to your actual gateway. Do not reuse the sample values as-is.
+`{file:zen-gate.key}` is opencode's variable substitution syntax. The path is relative to the config file directory, so it reads `config/zen-gate.key` as the API key.
+
+- `config/zen-gate.key` is gitignored, so the master key never lands in version control;
+- WARP Control writes the key there automatically when it starts zen-gate;
+- You can inline the key instead, but then be careful never to commit it.
 
 ## WARP backends
 
@@ -214,7 +218,7 @@ warp-cli --accept-tos registration new
 **First use of usque**:
 
 ```bash
-usque -c "path/to/config.json" register -a
+bin\usque.exe -c "config\usque\config.json" register -a
 ```
 
 **Bundled backend download fails** — set `builtin_mirror` in Settings (for example `https://ghfast.top`), or download `warp-plus` manually and place it in `bin/`.
@@ -248,13 +252,23 @@ On the opencode side, set the provider `baseURL` to `http://127.0.0.1:8788/v1` a
 
 ## Configuration
 
-The configuration lives in `config.json` next to the program, and can also be edited on the **Settings** page. Changing ports or zen-gate settings requires restarting WARP Control.
+The configuration lives in `config/config.json` next to the program, and can also be edited on the **Settings** page. Changing ports or zen-gate settings requires restarting WARP Control.
+
+### Path convention (important)
+
+Every path inside the project is stored **relative to the project root**: `backend_path`, `usque_config`, `zen_path`, `zen_data_dir`, `watch_log`, and the paths in both launcher scripts. The folder can be renamed, moved, or copied freely without breaking startup.
+
+- Startup commands, error messages and `/api/config` all display relative paths. Absolute paths are computed at runtime from the directory containing `warp_control.py` and are **never persisted** to the config file.
+- When upgrading, absolute paths left over from an older config (for example `F:\xxx\warp-control\bin\usque.exe`) are normalized to relative paths and written back once at startup.
+- Exception: system-wide external locations cannot be made relative — the `warp-cli` install path, the Python install locations probed by `start.bat`, and any program/log path outside the project that you enter yourself.
+- The launchers run `cd /d "%~dp0"` first and then use relative paths only; `%~dp0` is a dynamic base, not a hard-coded drive or folder name.
 
 | Key | Default | Description |
 | --- | --- | --- |
 | `backend` | `auto` | Backend type: `auto` / `builtin` / `warp-cli` / `warp-plus` / `usque` / `custom` |
-| `backend_path` | `""` | Backend executable path; auto-detected when empty |
-| `usque_config` | `""` | usque config path; defaults to `usque/config.json` |
+| `backend_path` | `""` | Backend executable path, relative to the project root (e.g. `bin/usque.exe`); auto-detected when empty |
+| `usque_config` | `""` | usque config path, relative to the project root; defaults to `config/usque/config.json` |
+| `usque_endpoint` | `""` | Pin the MASQUE endpoint IP; written to `endpoint_v4` / `endpoint_h2_v4` on each backend start. Empty keeps the registered endpoint |
 | `socks_port` | `40000` | Upstream SOCKS5 port |
 | `http_port` | `7891` | Local HTTP proxy port |
 | `probe_interval` | `20` | Egress probe interval (seconds) |
@@ -265,12 +279,12 @@ The configuration lives in `config.json` next to the program, and can also be ed
 | `custom_command` | `""` | Custom backend command; `{port}` becomes the SOCKS5 port |
 | `warp_plus_args` | `""` | Extra warp-plus arguments, e.g. `--gool --scan` |
 | `builtin_mirror` | `""` | Download mirror prefix for the bundled backend |
-| `watch_log` | `""` | opencode log file to watch |
+| `watch_log` | `""` | opencode log file to watch, relative to the project root |
 | `watch_pattern` | see below | Ban keyword regex for log watching |
 | `verify_ssl` | `true` | Verify certificates during probes |
 | `zen_enabled` | `true` | Start/stop zen-gate together with WARP |
-| `zen_path` | `bin/zen-gate.exe` | zen-gate executable; relative paths resolve from the program directory |
-| `zen_data_dir` | `""` | zen-gate data directory; empty means its default |
+| `zen_path` | `bin/zen-gate.exe` | zen-gate executable, relative to the project root |
+| `zen_data_dir` | `""` | zen-gate data directory; may be relative to the project root; empty means its default |
 | `zen_port` | `8788` | zen-gate listening port |
 | `zen_force_warp` | `true` | Force zen-gate egress through WARP |
 
@@ -323,26 +337,28 @@ python warp_control.py [--host 127.0.0.1] [--port 8787] [--no-browser] [--export
 ```text
 warp-control/
 ├─ warp_control.py          # Main program (console + proxy bridge + backend manager)
-├─ config.json              # Runtime configuration
-├─ opencode.json            # Sample opencode provider config
+├─ config/                  # All configuration files
+│  ├─ config.json           # Runtime configuration
+│  ├─ opencode.json         # opencode provider config
+│  ├─ zen-gate.key          # zen-gate master key (generated, gitignored)
+│  └─ usque/config.json     # usque registration config (device key, gitignored)
 ├─ start.bat                # Windows one-click launcher (finds Python)
 ├─ start-opencode.bat       # Launch opencode with proxy env vars
+├─ start-with-opencode.bat  # Start the console and auto-launch opencode once WARP is ready
+├─ asset/                   # Static assets such as the donation QR codes
 ├─ preview.html             # Static UI preview
 ├─ bin/                     # Bundled backend / zen-gate / opencode executables
 │  ├─ warp-plus.exe
 │  ├─ usque.exe
 │  ├─ zen-gate.exe
 │  └─ opencode.exe
-├─ usque/
-│  └─ config.json           # usque registration config
-└─ zen-gate/                # zen-gate source and assets (separate project)
 ```
 
 ## Troubleshooting
 
 **Python not found / `start.bat` closes immediately**
 
-Install Python 3.8+, enable Add Python to PATH, then run `python warp_control.py` in a terminal to see the error.
+`start.bat` detects Python first and, if missing, downloads Python 3.12.10 and installs it silently per-user (no admin needed). If that fails, install Python 3.8+ manually with Add Python to PATH, then run `python warp_control.py` in a terminal to see the error.
 
 **Bundled backend download fails**
 
@@ -355,6 +371,10 @@ set WARP_GH_MIRROR=https://ghfast.top/
 start.bat
 ```
 
+**Startup fails with `[WinError 2] The system cannot find the file specified`**
+
+This almost always means an absolute path from an older directory survived in the config. After renaming, moving, or copying the folder, the exe still points at the old location — sometimes even mixing the old folder's exe with the new folder's config. Check that `backend_path` in `config/config.json` is relative (e.g. `bin\usque.exe`); startup normalizes any leftover absolute paths and writes them back once. The logged "startup command" now shows relative paths too, so a wrong base directory is obvious.
+
 **`warp-cli connect` fails**
 
 Register first: `warp-cli --accept-tos registration new`. Also, warp-cli proxy mode cannot coexist with the system-wide WARP mode.
@@ -365,7 +385,11 @@ Before starting the WARP backend, WARP Control force-cleans the environment: it 
 
 **usque keeps reconnecting / MASQUE connection times out**
 
-Check `endpoint_v4` in `usque/config.json`. Some networks block `162.159.198.2`; switch to a reachable endpoint in the same range, such as `162.159.198.1`, then restart WARP Control. Changing the endpoint does not affect the registered account.
+`Failed to connect tunnel: ... no recent network activity` plus repeated `urlopen error timed out` probes means the tunnel never came up; rotating IPs will not help.
+
+Some networks block the registered `162.159.198.2`. Set `usque_endpoint` in `config/config.json` to a reachable endpoint in the same range (`162.159.198.1` verified working here) and restart WARP Control. The program rewrites it into `config/usque/config.json` on every backend start, so re-registering will not revert it. The registered account is unaffected.
+
+To test an endpoint: `usque.exe -c <temp config copy> socks --bind 127.0.0.1 --port 40001`, then `curl --socks5-hostname 127.0.0.1:40001 https://www.cloudflare.com/cdn-cgi/trace`; `warp=on` means it works. TCP reachability does not imply QUIC reachability, and `--http2` is not a universal fallback.
 
 **opencode still connects directly**
 
@@ -374,6 +398,16 @@ Make sure the proxy variables are active in the same terminal, use `start-openco
 **zen-gate keeps returning 429**
 
 Confirm automatic rotation is enabled. Zen quota signals have a 90-second cooldown to avoid restarting the backend in a 429 loop. If rotating does not help, the restriction may be lane-level rather than IP-level.
+
+**Zen models do not work in opencode**
+
+Check in this order:
+
+1. `baseURL` in `config/opencode.json` must be `http://127.0.0.1:8788/v1` (zen-gate's real port); a dead port makes opencode fail with a connection error;
+2. `apiKey` must match zen-gate's master key (`mainKey` in `%APPDATA%\zen-gate\config.json`); a wrong key returns `401 invalid API key`. Prefer `{file:zen-gate.key}`, which WARP Control keeps in sync;
+3. `throttled` / `FreeUsageLimitError` on the Models page means the **OpenCode Zen free lane quota is exhausted**, not that the IP is blocked. Enable "fall back to providers" (`laneFallbackToProviders`) in zen-gate and requests are re-routed to the kilo / openrouter free lanes, which still work in practice;
+4. `beam-free` returning `RegionError` is a regional restriction that rotation may not bypass;
+5. Restart opencode (close the terminal and rerun `start-opencode.bat`) after changing the config.
 
 **Certificate error during probing**
 
